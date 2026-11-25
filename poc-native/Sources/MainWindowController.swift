@@ -104,12 +104,12 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
         ])
         
         TabManager.shared.delegate = self
-        WebExtensionManager.shared.onExtensionsChanged = { [weak self] exts in
-            self?.sidebarView.updateExtensions(exts)
-        }
-        
-        // Create initial tab
-        _ = TabManager.shared.createTab(url: URL(string: "https://news.ycombinator.com"))
+        let savedSidebarState = BrowserSessionStore.shared.load()?.sidebarVisible ?? true
+        isSidebarVisible = savedSidebarState
+        sidebarLeadingConstraint.constant = savedSidebarState ? 0 : -sidebarWidth
+
+        // Restore persistent tabs; private browsing state is intentionally not restored.
+        TabManager.shared.restoreSession()
         setupProgressObserver()
     }
     
@@ -144,7 +144,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     }
     @objc public func menuReload() { omniboxDidClickReload() }
     @objc public func menuToggleSidebar() { omniboxDidToggleSidebar() }
-    @objc public func menuFocusAddress() { omniboxView.focusAddressField() }
+""
     
     // MARK: - TabManagerDelegate
     public func tabManagerDidUpdateTabs() {
@@ -219,12 +219,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
         }
     }
     
-    public func omniboxDidToggleAdBlock() {
-        let active = AdBlockManager.shared.toggle()
-        sidebarView.updateAdBlock(enabled: active)
-    }
-    
-    public func omniboxDidRequestInstallExtension() {
+    private func showExtensionInstallSheet() {
         if installSheet == nil {
             installSheet = ExtensionInstallSheet()
         }
@@ -282,18 +277,19 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     public func sidebarDidSelectTab(id: UUID) { TabManager.shared.selectTab(id: id) }
     public func sidebarDidCloseTab(id: UUID) { TabManager.shared.closeTab(id: id) }
     public func sidebarDidCreateNewTab() { _ = TabManager.shared.createTab() }
-    public func sidebarDidToggleAdBlock() { omniboxDidToggleAdBlock() }
-    public func sidebarDidRequestInstallExtension() { omniboxDidRequestInstallExtension() }
-    public func sidebarDidRequestOpenBrambleVault() { WebExtensionManager.shared.openBrambleOptionsTab() }
-    
-    public func sidebarDidTestBiometrics() {
-        sidebarView.updateBiometrics(message: "Prompting Touch ID...", success: true)
-        BrambleNativeBridge.shared.authenticateWithBiometrics { [weak self] success, err in
-            if success {
-                self?.sidebarView.updateBiometrics(message: "✓ Touch ID Verified!", success: true)
-            } else {
-                self?.sidebarView.updateBiometrics(message: "✗ Failed: \(err ?? "Cancelled")", success: false)
-            }
+    public func sidebarDidTogglePinTab(id: UUID) { TabManager.shared.togglePinned(id: id) }
+
+    private func runTouchIDTest() {
+        BrambleNativeBridge.shared.authenticateWithBiometrics { success, error in
+            let alert = NSAlert()
+            alert.messageText = success ? "Touch ID test passed" : "Touch ID test failed"
+            alert.informativeText = success ? "Authentication completed successfully." : (error ?? "Authentication was cancelled.")
+            alert.alertStyle = success ? .informational : .warning
+            alert.runModal()
         }
+    }
+
+    public func windowWillClose(_ notification: Notification) {
+        TabManager.shared.persistSession(sidebarVisible: isSidebarVisible)
     }
 }
