@@ -19,8 +19,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         
         // Load Real Bramble and extensions
         let cwd = FileManager.default.currentDirectoryPath
-        Task {
+        Task { [weak self] in
             await WebExtensionManager.shared.loadDefaultExtensions(basePath: cwd)
+            await MainActor.run {
+                self?.windowController?.restoreBrowserSession()
+            }
         }
     }
     
