@@ -28,18 +28,10 @@ public final class WebExtensionManager: NSObject, WKWebExtensionControllerDelega
     }
 
     public var brambleIcon: NSImage? {
-        guard let info = loadedExtensions.first(where: { $0.id == "bramble" }) else { return nil }
-        let root = URL(fileURLWithPath: info.path, isDirectory: true)
-        guard let data = try? Data(contentsOf: root.appendingPathComponent("manifest.json")),
-              let manifest = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let icons = manifest["icons"] as? [String: String] else { return nil }
-        let candidates = icons.keys.compactMap { Int($0) }.sorted(by: >)
-        for size in candidates {
-            guard let file = icons[String(size)] else { continue }
-            let url = root.appendingPathComponent(file)
-            if let image = NSImage(contentsOf: url) { return image }
-        }
-        return nil
+        guard let context = brambleContext else { return nil }
+        return context.action(for: nil)?.icon(for: NSSize(width: 24, height: 24))
+            ?? context.webExtension.actionIcon(for: NSSize(width: 24, height: 24))
+            ?? context.webExtension.icon(for: NSSize(width: 24, height: 24))
     }
 
     public var bramblePopupWebView: WKWebView? {
