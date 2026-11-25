@@ -22,7 +22,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
             backing: .buffered,
             defer: false
         )
-        window.title = "Surffish Native"
+        window.title = "Surffish — \(BrowserProfile.current.displayName)"
         window.isOpaque = false
         window.backgroundColor = .clear // Enables true macOS desktop glass blur
         window.hasShadow = true
