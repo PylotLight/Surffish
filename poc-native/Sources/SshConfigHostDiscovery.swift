@@ -49,8 +49,15 @@ public enum SshConfigHostDiscovery {
                 }
             } else if directive == "include" {
                 for value in values {
-                    let expanded = value
-                        .replacingOccurrences(of: "~", with: home.path, range: value.startIndex..<value.index(after: value.startIndex))
+                    var expanded = value
+                    if expanded == "~" {
+                        expanded = home.path
+                    } else if expanded.hasPrefix("~/") {
+                        expanded = home.path + String(expanded.dropFirst())
+                    }
+                    if expanded.contains("$HOME") {
+                        expanded = expanded.replacingOccurrences(of: "$HOME", with: home.path)
+                    }
                     let includePath = (expanded as NSString).isAbsolutePath
                         ? expanded
                         : canonical.deletingLastPathComponent().appendingPathComponent(expanded).path
