@@ -343,8 +343,10 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
         popover.contentSize = popupSize
 
         let vc = NSViewController()
+        vc.preferredContentSize = popupSize
         vc.view = popupHost
         popover.contentViewController = vc
+        popover.contentSize = popupSize
         
         popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .maxY)
         self.bramblePopover = popover
