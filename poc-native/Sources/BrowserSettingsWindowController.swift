@@ -42,11 +42,6 @@ public final class BrowserSettingsWindowController: NSWindowController {
         let searchRow = makeRow(title: "Search engine", control: searchEngine)
         let startRow = makeRow(title: "New tab page", control: startPage)
 
-        restoreSession.target = self
-        restoreSession.action = #selector(saveSettings)
-        showSidebar.target = self
-        showSidebar.action = #selector(saveSettings)
-
         let saveButton = NSButton(title: "Save", target: self, action: #selector(saveSettings))
         saveButton.bezelStyle = .rounded
         saveButton.keyEquivalent = "\r"
