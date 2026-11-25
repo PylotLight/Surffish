@@ -222,6 +222,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
         if settingsViewController == nil {
             let controller = BrowserSettingsViewController()
             controller.onClose = { [weak self] in self?.showActiveBrowserTab() }
+            controller.onInstallExtension = { [weak self] in self?.showExtensionInstallSheet() }
             settingsViewController = controller
         }
         guard let settingsView = settingsViewController?.view else { return }
@@ -448,7 +449,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     public func sidebarDidCloseTab(id: UUID) { TabManager.shared.closeTab(id: id) }
     public func sidebarDidCreateNewTab() { _ = TabManager.shared.createTab() }
     public func sidebarDidTogglePinTab(id: UUID) { TabManager.shared.togglePinned(id: id) }
-    public func sidebarDidOpenExtensions() { showExtensionInstallSheet() }
+    public func sidebarDidOpenExtensions() { menuOpenSettings() }
     public func sidebarDidOpenSettings() { menuOpenSettings() }
     public func sidebarDidQuit() { NSApp.terminate(nil) }
     public func sidebarDidToggleSidebar() { omniboxDidToggleSidebar() }
