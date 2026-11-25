@@ -61,7 +61,7 @@ public final class WebExtensionManager: NSObject, WKWebExtensionControllerDelega
         let nativeMessaging = WKWebExtension.Permission.nativeMessaging
         guard permissions.contains(nativeMessaging) else {
             completionHandler([], nil)
-            DeveloperConsole.shared.record(level: "WARN", source: "Extension Permissions", message: "Denied unhandled permission request: \(permissions.map(\\.rawValue).joined(separator: \", \"))")
+            DeveloperConsole.shared.record(level: "WARN", source: "Extension Permissions", message: "Denied unhandled permission request containing \(permissions.count) permission(s)")
             return
         }
 
