@@ -285,7 +285,7 @@ public final class WebExtensionManager: NSObject, WKWebExtensionControllerDelega
             if !loadedExtensions.contains(where: { $0.id == info.id }) {
                 loadedExtensions.append(info)
             }
-            onExtensionsChanged?(loadedExtensions)
+            notifyExtensionsChanged()
         }
 
         print("[WebExtension] Loaded: \(info.name) v\(info.version) (manifest \(info.manifestVersion), popup: \(info.hasPopup))")
@@ -332,7 +332,7 @@ public final class WebExtensionManager: NSObject, WKWebExtensionControllerDelega
         try controller.unload(info.context)
         loadedExtensions.removeAll { $0.id == id }
         if brambleContext === info.context { brambleContext = nil }
-        onExtensionsChanged?(loadedExtensions)
+        notifyExtensionsChanged()
 
         let extensionURL = URL(fileURLWithPath: info.path).standardizedFileURL
         let root = extensionsDirectory().standardizedFileURL
