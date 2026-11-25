@@ -7,7 +7,7 @@ import WebKit
 public final class BrambleNativeBridge: NSObject, WKScriptMessageHandlerWithReply {
     public static let shared = BrambleNativeBridge()
     
-    private let keychainService = "com.surffish.native.bramble"
+    private var keychainService: String { "com.surffish.app.bramble.\(BrowserProfile.current.rawValue)" }
     private let keychainAccount = "touchid-prf-secret"
     private var registeredControllers = NSHashTable<WKUserContentController>.weakObjects()
     
