@@ -39,7 +39,7 @@ public final class SshTunnelManager {
         self.browserEnabled = browserEnabled
         self.enabled = browserEnabled || serverEnabled
         self.target = target.trimmingCharacters(in: .whitespacesAndNewlines)
-        self.bindAddress = bindAddress
+        self.bindAddress = serverEnabled ? bindAddress : "127.0.0.1"
         guard (1...65535).contains(port), let validPort = UInt16(exactly: port) else {
             updateStatus("SOCKS5 port must be between 1 and 65535")
             return
