@@ -419,7 +419,7 @@ public final class BrowserDownloadManager: NSObject, WKDownloadDelegate {
 
     private func uniqueDestination(in directory: URL, filename: String) -> URL {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let safe = safeFilename(filename)
+        let safe = Self.safeFilename(filename)
         let original = URL(fileURLWithPath: safe)
         let stem = original.deletingPathExtension().lastPathComponent
         let suffix = original.pathExtension

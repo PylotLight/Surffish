@@ -373,6 +373,7 @@ test("native downloads use WebKit, profile-local history, private exclusion, and
   assert.match(downloads, /download\.cancel\(nil\)/);
   assert.match(downloads, /func canResume\(_ id: UUID\)/);
   assert.match(downloads, /safeFilename\(_ value: String\)/);
+  assert.match(downloads, /let safe = Self\.safeFilename\(filename\)/);
   assert.match(downloads, /safeSource\(_ url: URL\?\)/);
   assert.match(downloads, /defaultDownloadsDirectoryAfterFailure\(\)/);
   assert.match(downloads, /destinationWarning/);
