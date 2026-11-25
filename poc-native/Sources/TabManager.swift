@@ -103,6 +103,8 @@ public final class TabManager: NSObject, WKNavigationDelegate {
             BrambleNativeBridge.shared.applyTo(userContentController: configuration.userContentController)
         }
 
+        WebKitProxyController.apply(port: SshTunnelManager.shared.proxyPort, to: configuration.websiteDataStore)
+
         let webView = WKWebView(frame: .zero, configuration: configuration)
         if #available(macOS 13.3, *) { webView.isInspectable = true }
         webView.allowsBackForwardNavigationGestures = true
@@ -223,6 +225,18 @@ public final class TabManager: NSObject, WKNavigationDelegate {
         let upperBound = moving.isPinned ? max(0, pinnedCount - 1) : tabs.count
         tabs.insert(moving, at: min(max(destination, lowerBound), upperBound))
         notifyTabsChanged()
+    }
+
+    public func applyProxyConfiguration(port: UInt16?) {
+        for tab in tabs {
+            WebKitProxyController.apply(port: port, to: tab.webView.configuration.websiteDataStore)
+        }
+    }
+
+    public func reloadAllTabs() {
+        for tab in tabs {
+            tab.webView.reload()
+        }
     }
 
     public func updateTab(id: UUID, groupID: UUID?, spaceID: String) {
