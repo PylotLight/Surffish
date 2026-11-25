@@ -60,6 +60,9 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     private var downloadsPopover: NSPopover?
     private var installSheet: ExtensionInstallSheet?
     private var settingsViewController: BrowserSettingsViewController?
+    private var navigationErrorHostingView: NSView?
+    private var displayedNavigationErrorID: UUID?
+    private var displayedNavigationErrorTabID: UUID?
     
     public init() {
         let window = SurffishBrowserWindow(
@@ -393,6 +396,9 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
         sidebarView.reloadTabs()
         if let active = TabManager.shared.activeTab {
             omniboxView.updateForTab(active)
+            if settingsViewController?.view.superview == nil {
+                updateNavigationErrorOverlay(for: active)
+            }
         }
     }
     
@@ -407,6 +413,9 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
         progressObservation?.invalidate()
         progressObservation = nil
         webContainerView.subviews.forEach { if $0 !== findBarView { $0.removeFromSuperview() } }
+        navigationErrorHostingView = nil
+        displayedNavigationErrorID = nil
+        displayedNavigationErrorTabID = nil
 
         tab.webView.translatesAutoresizingMaskIntoConstraints = false
         webContainerView.addSubview(tab.webView)
@@ -422,7 +431,48 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
         setupProgressObserver()
         omniboxView.updateForTab(tab)
         sidebarView.reloadTabs()
+        updateNavigationErrorOverlay(for: tab)
         if !findBarView.isHidden { searchInPage(findBarView.query, backwards: false) }
+    }
+
+    private func updateNavigationErrorOverlay(for tab: TabItem) {
+        guard let error = tab.navigationError else {
+            navigationErrorHostingView?.removeFromSuperview()
+            navigationErrorHostingView = nil
+            displayedNavigationErrorID = nil
+            displayedNavigationErrorTabID = nil
+            return
+        }
+        guard displayedNavigationErrorID != error.id || displayedNavigationErrorTabID != tab.id else { return }
+
+        navigationErrorHostingView?.removeFromSuperview()
+        let hostedView = NSHostingView(rootView: BrowserNavigationErrorView(
+            error: error,
+            canGoBack: tab.webView.canGoBack,
+            onRetry: { [weak tab] in
+                guard let tab else { return }
+                TabManager.shared.retryNavigation(id: tab.id)
+            },
+            onGoBackOrNewTab: { [weak tab] in
+                guard let tab else { return }
+                if tab.webView.canGoBack {
+                    tab.webView.goBack()
+                } else {
+                    _ = TabManager.shared.createTab(url: TabManager.startPage, makeActive: true)
+                }
+            }
+        ))
+        hostedView.translatesAutoresizingMaskIntoConstraints = false
+        webContainerView.addSubview(hostedView)
+        NSLayoutConstraint.activate([
+            hostedView.topAnchor.constraint(equalTo: webContainerView.topAnchor),
+            hostedView.leadingAnchor.constraint(equalTo: webContainerView.leadingAnchor),
+            hostedView.trailingAnchor.constraint(equalTo: webContainerView.trailingAnchor),
+            hostedView.bottomAnchor.constraint(equalTo: webContainerView.bottomAnchor)
+        ])
+        navigationErrorHostingView = hostedView
+        displayedNavigationErrorID = error.id
+        displayedNavigationErrorTabID = tab.id
     }
     
     // MARK: - OmniboxViewDelegate
@@ -454,7 +504,9 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     public func omniboxDidClickForward() { TabManager.shared.activeTab?.webView.goForward() }
     public func omniboxDidClickReload() {
         guard let tab = TabManager.shared.activeTab else { return }
-        if tab.isLoading {
+        if tab.navigationError != nil {
+            TabManager.shared.retryNavigation(id: tab.id)
+        } else if tab.isLoading {
             tab.webView.stopLoading()
         } else {
             tab.webView.reload()
@@ -504,8 +556,9 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 
     public func omniboxDidToggleBookmark() {
         guard let tab = TabManager.shared.activeTab,
-              let url = tab.webView.url ?? tab.url else { return }
-        _ = BrowserLibraryStore.shared.toggleBookmark(url: url, title: tab.webView.title ?? tab.title)
+              let url = tab.navigationError?.url ?? tab.webView.url ?? tab.url else { return }
+        let title = tab.navigationError?.siteName ?? tab.webView.title ?? tab.title
+        _ = BrowserLibraryStore.shared.toggleBookmark(url: url, title: title)
         sidebarView.reloadTabs()
         omniboxView.updateForTab(tab)
     }
@@ -513,9 +566,10 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     public func omniboxDidToggleReadingList() {
         guard let tab = TabManager.shared.activeTab,
               !tab.isPrivate,
-              let url = tab.webView.url ?? tab.url,
+              let url = tab.navigationError?.url ?? tab.webView.url ?? tab.url,
               let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return }
-        _ = BrowserLibraryStore.shared.toggleReadingList(url: url, title: tab.webView.title ?? tab.title)
+        let title = tab.navigationError?.siteName ?? tab.webView.title ?? tab.title
+        _ = BrowserLibraryStore.shared.toggleReadingList(url: url, title: title)
         sidebarView.reloadTabs()
         omniboxView.updateForTab(tab)
     }

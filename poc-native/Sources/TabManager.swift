@@ -6,6 +6,7 @@ public final class TabItem: NSObject, Identifiable, WKWebExtensionTab {
     public var title: String
     public var url: URL?
     public var isLoading: Bool
+    public var navigationError: BrowserNavigationError? = nil
     public var isPinned: Bool
     public var isPrivate: Bool
     public var groupID: UUID?
@@ -340,6 +341,15 @@ public final class TabManager: NSObject, WKNavigationDelegate {
         }
     }
 
+    public func retryNavigation(id: UUID) {
+        guard let tab = tabs.first(where: { $0.id == id }),
+              let url = tab.navigationError?.url ?? tab.webView.url ?? tab.url else { return }
+        tab.navigationError = nil
+        tab.isLoading = true
+        notifyTabsChanged()
+        tab.webView.load(URLRequest(url: url))
+    }
+
     public func updateTab(id: UUID, groupID: UUID?, spaceID: String) {
         guard let tab = tabs.first(where: { $0.id == id }) else { return }
         tab.groupID = groupID
@@ -425,6 +435,7 @@ public final class TabManager: NSObject, WKNavigationDelegate {
     public func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         guard let tab = tabs.first(where: { $0.webView === webView }) else { return }
         tab.isLoading = true
+        tab.navigationError = nil
         notifyTabsChanged()
     }
 
@@ -432,6 +443,7 @@ public final class TabManager: NSObject, WKNavigationDelegate {
         guard let tab = tabs.first(where: { $0.webView === webView }) else { return }
         tab.isLoading = false
         tab.url = webView.url
+        tab.navigationError = nil
         applyPageZoom(to: tab)
         if let title = webView.title, !title.isEmpty { tab.title = title }
         else if let host = webView.url?.host { tab.title = host }
@@ -443,18 +455,26 @@ public final class TabManager: NSObject, WKNavigationDelegate {
     }
 
     public func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        guard let tab = tabs.first(where: { $0.webView === webView }) else { return }
-        restoredSessionTabIDs.remove(tab.id)
-        DeveloperConsole.shared.recordNavigationFailure(url: webView.url ?? tab.url, error: error, provisional: false)
-        tab.isLoading = false
-        notifyTabsChanged()
+        recordNavigationFailure(in: webView, error: error, provisional: false)
     }
 
     public func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        recordNavigationFailure(in: webView, error: error, provisional: true)
+    }
+
+    public func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        guard let tab = tabs.first(where: { $0.webView === webView }) else { return }
+        tab.isLoading = false
+        tab.navigationError = .webContentProcessTerminated(url: webView.url ?? tab.url)
+        notifyTabsChanged()
+    }
+
+    private func recordNavigationFailure(in webView: WKWebView, error: Error, provisional: Bool) {
         guard let tab = tabs.first(where: { $0.webView === webView }) else { return }
         restoredSessionTabIDs.remove(tab.id)
-        DeveloperConsole.shared.recordNavigationFailure(url: webView.url ?? tab.url, error: error, provisional: true)
+        DeveloperConsole.shared.recordNavigationFailure(url: webView.url ?? tab.url, error: error, provisional: provisional)
         tab.isLoading = false
+        tab.navigationError = BrowserNavigationError.from(error, fallbackURL: webView.url ?? tab.url)
         notifyTabsChanged()
     }
 }
