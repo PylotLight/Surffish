@@ -53,6 +53,23 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
         rootGlass.state = .active
         rootGlass.wantsLayer = true
         rootGlass.translatesAutoresizingMaskIntoConstraints = false
+
+        // One shared tint surface spans the sidebar and toolbar. This avoids the visible
+        // material seam caused by giving the two adjacent regions separate backgrounds.
+        let frameTint = NSView(frame: rootGlass.bounds)
+        frameTint.wantsLayer = true
+        let frameGradient = CAGradientLayer()
+        frameGradient.colors = [
+            NSColor(red: 0.063, green: 0.078, blue: 0.098, alpha: 0.60).cgColor,
+            NSColor(red: 0.153, green: 0.180, blue: 0.216, alpha: 0.44).cgColor,
+            NSColor(red: 0.071, green: 0.086, blue: 0.106, alpha: 0.56).cgColor
+        ]
+        frameGradient.locations = [0.0, 0.58, 1.0]
+        frameGradient.startPoint = CGPoint(x: 0.5, y: 1.0)
+        frameGradient.endPoint = CGPoint(x: 0.5, y: 0.0)
+        frameTint.layer = frameGradient
+        frameTint.autoresizingMask = [.width, .height]
+        rootGlass.addSubview(frameTint)
         contentView.addSubview(rootGlass)
         
         // 2. Full-height Left Sidebar (traffic lights sit inside top of sidebar)
