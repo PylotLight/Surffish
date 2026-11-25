@@ -1,70 +1,51 @@
-# Surffish Native WebKit PoC
+# Surffish Native
 
-A native macOS architecture spike for Surffish evaluating:
+Native macOS browser implementation using Swift, AppKit and WebKit.
 
-- **Stack**: Swift + AppKit + WKWebView + WKWebExtension + LocalAuthentication (Touch ID)
-- **Branch**: `poc-native-webkit`
+This branch is a native-first browser implementation. The production Electron application on `main` is the behavioural reference for browser state, tabs, settings and feature parity; its React UI is not embedded in this app.
 
----
+## Current native architecture
 
-## What's Included in this Milestone
+- `TabManager.swift`: native WKWebView tab lifecycle, stable tab IDs, active selection, pinning, group/Space metadata and navigation updates.
+- `BrowserSessionStore.swift`: versioned, atomic browser-session persistence under `~/Library/Application Support/SurffishNative/browser-session.json`.
+- `MainWindowController.swift`: native window, sidebar, toolbar, WebKit content, browser commands and extension-window integration.
+- `SidebarView.swift`: tab list and pin/close/new-tab actions only. Prototype diagnostics and test controls do not appear in the browser sidebar.
+- `OmniboxView.swift`: native navigation controls, address/search field, load progress and Bramble extension action.
+- `MainMenu.swift`: standard macOS menus plus a dedicated **Testing** menu for temporary prototype hooks.
 
-### 1. Liquid Glass & Vibrancy (Resolves Issue #330)
+Normal tabs use WebKit's persistent default website data store. Private tabs use a non-persistent data store and are excluded from the saved session. The session restores stable tab IDs, URLs, titles, pin state, group metadata, Space metadata and the active tab.
 
-- `window.isOpaque = false` and `window.backgroundColor = .clear` enables true macOS desktop blur.
-- Root and sidebar layers use `NSVisualEffectView` (`.sidebar` and `.underWindowBackground` with `.behindWindow` blending mode).
-- Surffish dark slate glass tint overlay (`rgba(18, 21, 25, 0.65)`).
-- Web content is framed as an inset rounded card (`cornerRadius: 10`, `1px` subtle highlight border `rgba(255, 255, 255, 0.12)`).
+## Production parity migration
 
-### 2. Native macOS Gestures
+See [the migration plan](../docs/native-webkit-frame-ui.md). The work is phased:
 
-- **Two-Finger Swipe Navigation**: `allowsBackForwardNavigationGestures = true` provides native Apple Liquid swipe back/forward with live page peeking and rubber-band physics.
-- **Trackpad Pinch-to-Zoom**: `allowsMagnification = true`.
+1. Core browser state and session persistence.
+2. Production tab organization: groups, Spaces, split views, tab overview and drag/drop.
+3. Production browser shell: full sidebar, toolbar, overflow and native settings entry point.
+4. Production settings and preference migrations.
+5. Browser feature parity: history, bookmarks, reading list, downloads, permissions, security, PDF, reader mode, translation and extension management.
+6. macOS validation, regression tests and hardening.
 
-### 3. Real Bramble Extension + Toolbar Popup
+The current implementation is the start of phase 1, not a claim of production parity.
 
-- Bundled the real **Bramble 1.38.0 release** (`poc-native/Resources/bramble`).
-- `WKWebExtension` loads Bramble with its MV3 background worker and popup.
-- The omnibox toolbar features a **🫐 Bramble button**: clicking it opens an `NSPopover` hosting Bramble's actual `popup.html` interface.
-- Native biometric quick unlock via `LocalAuthentication` (`LAContext`) for instant Touch ID authentication.
+## Testing menu
 
-### 4. Dynamic Extension Installer
+Temporary proof-of-concept hooks are available under **Testing**:
 
-- Click the **`🧩+`** button in the toolbar or sidebar to open the **Install Extension** sheet:
-  - **Chrome Web Store**: Enter an extension ID or store URL (e.g. `cjpalhdlnbpafiamejdnhcphjbkeiagm` for uBlock Origin or `nngceckbapebfimnlniiiahkandclblb` for Bitwarden) &rarr; automatically downloads the CRX3, unpacks it to `Application Support/SurffishNative/Extensions/`, and dynamically mounts it into `WKWebExtensionController`.
-  - **Disk Picker**: Choose any unpacked folder, `.zip`, `.crx`, or `.xpi` file.
+- Diagnostics
+- Test Ad Blocker
+- Install Extension
+- Test Touch ID
 
-### 5. Proper Omnibox, Search, and Multi-Tabs
+These are developer/testing tools, not production browser controls. The real Bramble extension action remains in the toolbar.
 
-- **Dark Glass Omnibox Pill**:
-  - Smart address resolution: URL/host detection vs. query routing to DuckDuckGo.
-  - Security lock indicator (🔒 HTTPS / ⚠️ non-HTTPS).
-  - Animated progress bar tracking `estimatedProgress`.
-  - Controls: Sidebar toggle `☰`, Back `◀`, Forward `▶`, Reload/Stop `⟳`.
-- **Multi-Tab Sidebar**:
-  - Vertical tab rows with active glow, page titles, loading spinner, and close `✕` button.
-  - `+ New Tab` button.
-  - Live memory sampler (`RSS: ~38 MB`).
-  - Native `WKContentRuleList` AdBlock toggle (`🛡️`).
+## Build and run
 
----
-
-## Building and Running
-
-To recompile:
+On macOS 15.4 or later with Xcode command-line tools installed:
 
 ```bash
 ./scripts/build-native-poc.sh
-```
-
-To run:
-
-```bash
 open poc-native/build/SurffishNative.app
 ```
 
-or run attached to terminal:
-
-```bash
-./poc-native/build/SurffishNative.app/Contents/MacOS/SurffishNative
-```
+The build script compiles all Swift sources in `poc-native/Sources`. This repository environment cannot compile AppKit/WebKit; the native build and runtime checks must be performed on macOS.
