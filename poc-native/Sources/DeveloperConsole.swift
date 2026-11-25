@@ -59,7 +59,18 @@ public final class DeveloperConsole: NSObject, WKScriptMessageHandler {
 
     public func captureExtensionErrors(_ context: WKWebExtensionContext, name: String) {
         let identity = ObjectIdentifier(context)
-        let current = Set(context.errors.map { $0.localizedDescription })
+        let current = Set(context.errors.map { error -> String in
+            let nsError = error as NSError
+            let metadata = nsError.userInfo
+                .filter { key, _ in
+                    ["WKWebExtensionErrorSourceURL", "WKWebExtensionErrorLineNumber", "WKWebExtensionErrorColumnNumber", "NSUnderlyingError"].contains(key)
+                }
+                .map { "\($0.key)=\($0.value)" }
+                .sorted()
+                .joined(separator: " ")
+            let location = metadata.isEmpty ? "" : " [\(metadata)]"
+            return "\(nsError.domain) (\(nsError.code)): \(nsError.localizedDescription)\(location)"
+        })
         let previous = previousExtensionErrors[identity] ?? []
 
         for description in current.subtracting(previous).sorted() {
