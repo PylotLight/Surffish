@@ -83,6 +83,8 @@ public struct BrowserSettings: Codable {
     public var startPage: String
     public var restoreSession: Bool
     public var showSidebarAtStartup: Bool
+    public var sidebarPinned: Bool
+    public var sidebarWidth: Int
     public var sshProxyEnabled: Bool
     public var sshHost: String
     public var sshProxyPort: Int
@@ -93,7 +95,7 @@ public struct BrowserSettings: Codable {
     public var newTabSiteSource: NewTabSiteSource
 
     private enum CodingKeys: String, CodingKey {
-        case version, searchEngine, startPage, restoreSession, showSidebarAtStartup
+        case version, searchEngine, startPage, restoreSession, showSidebarAtStartup, sidebarPinned, sidebarWidth
         case sshProxyEnabled, sshHost, sshProxyPort, sshProxyShareEnabled, sshProxyBindAddress, adBlockingEnabled
         case newTabTheme, newTabSiteSource
     }
@@ -104,6 +106,8 @@ public struct BrowserSettings: Codable {
         startPage: String,
         restoreSession: Bool,
         showSidebarAtStartup: Bool,
+        sidebarPinned: Bool = false,
+        sidebarWidth: Int = 280,
         sshProxyEnabled: Bool,
         sshHost: String,
         sshProxyPort: Int = 1080,
@@ -118,6 +122,8 @@ public struct BrowserSettings: Codable {
         self.startPage = startPage
         self.restoreSession = restoreSession
         self.showSidebarAtStartup = showSidebarAtStartup
+        self.sidebarPinned = sidebarPinned
+        self.sidebarWidth = min(max(sidebarWidth, Self.minimumSidebarWidth), Self.maximumSidebarWidth)
         self.sshProxyEnabled = sshProxyEnabled
         self.sshHost = sshHost
         self.sshProxyPort = sshProxyPort
@@ -135,6 +141,9 @@ public struct BrowserSettings: Codable {
         startPage = try values.decodeIfPresent(String.self, forKey: .startPage) ?? BrowserSettings.defaults.startPage
         restoreSession = try values.decodeIfPresent(Bool.self, forKey: .restoreSession) ?? true
         showSidebarAtStartup = try values.decodeIfPresent(Bool.self, forKey: .showSidebarAtStartup) ?? true
+        sidebarPinned = try values.decodeIfPresent(Bool.self, forKey: .sidebarPinned) ?? false
+        let savedSidebarWidth = try values.decodeIfPresent(Int.self, forKey: .sidebarWidth) ?? 280
+        sidebarWidth = min(max(savedSidebarWidth, Self.minimumSidebarWidth), Self.maximumSidebarWidth)
         sshProxyEnabled = try values.decodeIfPresent(Bool.self, forKey: .sshProxyEnabled) ?? false
         sshHost = try values.decodeIfPresent(String.self, forKey: .sshHost) ?? ""
         sshProxyPort = try values.decodeIfPresent(Int.self, forKey: .sshProxyPort) ?? 1080
@@ -145,12 +154,17 @@ public struct BrowserSettings: Codable {
         newTabSiteSource = try values.decodeIfPresent(NewTabSiteSource.self, forKey: .newTabSiteSource) ?? .automatic
     }
 
+    public static let minimumSidebarWidth = 220
+    public static let maximumSidebarWidth = 440
+
     public static let defaults = BrowserSettings(
         version: 1,
         searchEngine: .duckDuckGo,
         startPage: "surffish://newtab/",
         restoreSession: true,
         showSidebarAtStartup: true,
+        sidebarPinned: false,
+        sidebarWidth: 280,
         sshProxyEnabled: false,
         sshHost: "",
         sshProxyPort: 1080,

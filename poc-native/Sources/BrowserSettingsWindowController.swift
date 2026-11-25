@@ -9,6 +9,11 @@ public final class BrowserSettingsViewController: NSViewController {
 
     private var settingsModel: BrowserSettingsModel?
 
+    public func synchronizeSidebarSettings(isPinned: Bool, width: CGFloat) {
+        settingsModel?.sidebarPinned = isPinned
+        settingsModel?.sidebarWidth = Double(width)
+    }
+
     public override func loadView() {
         let model = BrowserSettingsModel()
         model.onClose = { [weak self] in self?.onClose?() }

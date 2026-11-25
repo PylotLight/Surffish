@@ -29,12 +29,24 @@ private final class ExtensionToolbarButton: NSButton {
     }
 }
 
+private final class NavigationHistoryButton: NSButton {
+    var historyMenuProvider: (() -> NSMenu?)?
+
+    override func rightMouseDown(with event: NSEvent) {
+        guard let menu = historyMenuProvider?(), !menu.items.isEmpty else {
+            super.rightMouseDown(with: event)
+            return
+        }
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: bounds.height), in: self)
+    }
+}
+
 public final class OmniboxView: NSVisualEffectView, NSTextFieldDelegate {
     public weak var delegate: OmniboxViewDelegate?
 
     private let sidebarToggleBtn = NSButton()
-    private let backBtn = NSButton()
-    private let forwardBtn = NSButton()
+    private let backBtn = NavigationHistoryButton(frame: .zero)
+    private let forwardBtn = NavigationHistoryButton(frame: .zero)
     private let reloadBtn = NSButton()
     private let tabsBtn = NSButton()
     private let historyBtn = NSButton()
@@ -47,6 +59,7 @@ public final class OmniboxView: NSVisualEffectView, NSTextFieldDelegate {
     private let securityIcon = NSImageView()
     private let addressField = NSTextField()
     private let progressBar = NSProgressIndicator()
+    private weak var activeTab: TabItem?
 
     private let brambleBtn = ExtensionToolbarButton()
 
@@ -71,6 +84,10 @@ public final class OmniboxView: NSVisualEffectView, NSTextFieldDelegate {
 
         configureButton(backBtn, symbol: "chevron.left", label: "Back", action: #selector(onBack))
         configureButton(forwardBtn, symbol: "chevron.right", label: "Forward", action: #selector(onForward))
+        backBtn.historyMenuProvider = { [weak self] in self?.historyMenu(forward: false) }
+        forwardBtn.historyMenuProvider = { [weak self] in self?.historyMenu(forward: true) }
+        backBtn.toolTip = "Back · right-click for history"
+        forwardBtn.toolTip = "Forward · right-click for history"
         configureButton(reloadBtn, symbol: "arrow.clockwise", label: "Reload", action: #selector(onReload))
         configureButton(tabsBtn, symbol: "square.stack", label: "Tabs", action: #selector(onTabs))
         configureButton(historyBtn, symbol: "clock.arrow.circlepath", label: "History", action: #selector(onHistory))
@@ -240,6 +257,7 @@ public final class OmniboxView: NSVisualEffectView, NSTextFieldDelegate {
     }
 
     public func updateForTab(_ tab: TabItem) {
+        activeTab = tab
         refreshExtensionButton()
         backBtn.isEnabled = tab.webView.canGoBack
         forwardBtn.isEnabled = tab.webView.canGoForward
@@ -297,6 +315,32 @@ public final class OmniboxView: NSVisualEffectView, NSTextFieldDelegate {
     public func focusAddressField() {
         window?.makeFirstResponder(addressField)
         addressField.currentEditor()?.selectAll(nil)
+    }
+
+    private func historyMenu(forward: Bool) -> NSMenu? {
+        guard let tab = activeTab else { return nil }
+        let backList = tab.webView.backForwardList.backList
+        let items = forward
+            ? tab.webView.backForwardList.forwardList
+            : Array(backList.reversed())
+        guard !items.isEmpty else { return nil }
+
+        let menu = NSMenu(title: forward ? "Forward History" : "Back History")
+        for historyItem in items.prefix(20) {
+            let title = historyItem.title.isEmpty
+                ? (historyItem.url.host ?? historyItem.url.absoluteString)
+                : historyItem.title
+            let menuItem = NSMenuItem(title: title, action: #selector(visitHistoryItem(_:)), keyEquivalent: "")
+            menuItem.representedObject = historyItem
+            menuItem.target = self
+            menu.addItem(menuItem)
+        }
+        return menu
+    }
+
+    @objc private func visitHistoryItem(_ sender: NSMenuItem) {
+        guard let item = sender.representedObject as? WKBackForwardListItem else { return }
+        activeTab?.webView.go(to: item)
     }
 
     @objc private func onFieldSubmit() {

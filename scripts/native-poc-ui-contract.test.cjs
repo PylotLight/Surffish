@@ -209,3 +209,62 @@ test("roadmap describes the implemented SSH dynamic SOCKS endpoint, not the obso
   assert.doesNotMatch(roadmap, /^\s*- Verify the NAS SOCKS host\/port/m);
   assert.match(roadmap, /Obsolete roadmap assumptions/);
 });
+
+test("native sidebar filters all content modes and supports partition-safe tab drag reordering", () => {
+  const sidebar = read("poc-native/Sources/SidebarView.swift");
+
+  assert.match(
+    sidebar,
+    /TextField\(searchPlaceholder, text: \$model\.searchText\)/,
+  );
+  assert.match(sidebar, /Clear search/);
+  assert.match(sidebar, /No history matches/);
+  assert.match(sidebar, /No bookmarks match/);
+  assert.match(sidebar, /No reading-list items match/);
+  assert.match(sidebar, /filteredTabs/);
+  assert.match(sidebar, /filteredPinnedTabs/);
+  assert.match(sidebar, /\.draggable\(tab\.id\.uuidString\)/);
+  assert.match(sidebar, /\.dropDestination\(for: String\.self\)/);
+  assert.match(sidebar, /moving\.isPinned == target\.isPinned/);
+  assert.match(
+    sidebar,
+    /TabManager\.shared\.moveTab\(id: id, to: destination\)/,
+  );
+  assert.match(sidebar, /refresh\(\)\n        return true/);
+});
+
+test("native sidebar pin and resize preferences persist without a second collapse button", () => {
+  const sidebar = read("poc-native/Sources/SidebarView.swift");
+  const settings = read("poc-native/Sources/BrowserSettingsView.swift");
+  const store = read("poc-native/Sources/BrowserSettingsStore.swift");
+  const shell = read("poc-native/Sources/BrowserShellView.swift");
+  const window = read("poc-native/Sources/MainWindowController.swift");
+  const toolbar = read("poc-native/Sources/OmniboxView.swift");
+
+  assert.match(sidebar, /sidebarDidTogglePinSidebar/);
+  assert.match(sidebar, /Keep sidebar open/);
+  assert.match(window, /isSidebarPinned = settings\.sidebarPinned/);
+  assert.match(window, /isSidebarVisible \|\| isSidebarPinned/);
+  assert.match(store, /sidebarPinned: Bool/);
+  assert.match(store, /sidebarWidth: Int/);
+  assert.match(store, /sidebarWidth = min\(max\(savedSidebarWidth/);
+  assert.match(settings, /Keep the sidebar open when the pointer leaves/);
+  assert.match(settings, /Slider\(/);
+  assert.match(shell, /DragGesture\(minimumDistance: 3\)/);
+  assert.match(shell, /onSidebarWidthCommitted/);
+  assert.equal(
+    (toolbar.match(/sidebarToggleBtn\s*=\s*NSButton/g) || []).length,
+    1,
+  );
+});
+
+test("native back and forward buttons expose each tab's WebKit history on right-click", () => {
+  const toolbar = read("poc-native/Sources/OmniboxView.swift");
+
+  assert.match(toolbar, /private final class NavigationHistoryButton/);
+  assert.match(toolbar, /historyMenuProvider/);
+  assert.match(toolbar, /backForwardList\.backList/);
+  assert.match(toolbar, /backForwardList\.forwardList/);
+  assert.match(toolbar, /webView\.go\(to: item\)/);
+  assert.match(toolbar, /right-click for history/);
+});

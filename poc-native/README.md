@@ -2,7 +2,7 @@
 
 Native macOS browser built with Swift, AppKit, WebKit and Network.framework.
 
-The Electron application on `main` is the behavioural and feature-parity reference. The native app does not embed Electron or reuse its renderer; it ports product behaviour onto macOS-native browser APIs.
+The Electron application on `main` (currently pinned to Electron `46.0.0-alpha.12`) is the behavioural and feature-parity reference. The native app does not embed Electron or reuse its renderer; it ports product behaviour onto macOS-native browser APIs.
 
 ## Platform
 
@@ -38,7 +38,7 @@ For command-line launches, `--profile production`, `--profile development` or `S
 - `BrowserLibraryStore.swift`: profile-local bookmarks and capped browsing history; private visits are excluded.
 - `MainWindowController.swift`: native window, sidebar, toolbar, WebKit content and browser commands.
 - `SidebarView.swift` and `OmniboxView.swift`: native browser chrome.
-- Native sidebar panels cover Tabs, History and Bookmarks; Settings is organized into General, Privacy, Extensions, Connection and About.
+- Native sidebar panels cover Tabs, History, Bookmarks and Reading List, with title/URL search, pinned/unpinned tab drag reordering, a separate keep-open pin and adjustable width. Back/Forward buttons expose each tab's WebKit navigation history on right-click. Settings is organized into General, Privacy, Extensions, Connection and About, with the supported sidebar and New Tab preferences backed by profile-local storage.
 - `WebExtensionManager.swift`: WebKit Web Extensions, Chrome Web Store CRX installs, Firefox Add-ons XPI installs and profile-specific extension storage.
 - `SshTunnelManager.swift`: native OpenSSH dynamic SOCKS5 forwarding (`-D`), readiness, status and reconnect.
 - `WebKitProxyController.swift`: WebKit SOCKSv5 proxy configuration with failover disabled.

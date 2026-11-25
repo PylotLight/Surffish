@@ -51,8 +51,9 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     private var isSidebarHovered: Bool = false
     private var isSidebarFocused: Bool = false
     private var isSidebarRevealRequested: Bool = false
+    private var isSidebarPinned: Bool = false
     private var sidebarRevealTask: Task<Void, Never>?
-    private let sidebarWidth: CGFloat = 280.0
+    private var sidebarWidth: CGFloat = 280.0
     private let collapsedSidebarWidth: CGFloat = 64.0
     
     private var bramblePopover: NSPopover?
@@ -147,7 +148,15 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
         findBarView.isHidden = true
         webContainerView.addSubview(findBarView)
 
+        let savedSettings = BrowserSettingsStore.shared.settings
+        sidebarWidth = CGFloat(savedSettings.sidebarWidth)
+        isSidebarPinned = savedSettings.sidebarPinned
+        isSidebarVisible = savedSettings.showSidebarAtStartup
         shellLayoutModel.sidebarWidth = sidebarWidth
+        shellLayoutModel.onSidebarWidthCommitted = { [weak self] width in
+            self?.sidebarWidthDidChange(width)
+        }
+        sidebarView.setPinned(isSidebarPinned)
         shellHostingView = NSHostingView(rootView: BrowserShellView(
             layout: shellLayoutModel,
             toolbar: omniboxView,
@@ -175,8 +184,6 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
         WebExtensionManager.shared.onExtensionsChanged = { [weak self] _ in
             DispatchQueue.main.async { self?.omniboxView.refreshExtensionButton() }
         }
-        let savedSidebarState = BrowserSettingsStore.shared.settings.showSidebarAtStartup
-        isSidebarVisible = savedSidebarState
         updateSidebarWidth(animated: false)
 
     }
@@ -404,6 +411,10 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     }
     
     public func omniboxDidToggleSidebar() {
+        if isSidebarPinned {
+            isSidebarPinned = false
+            sidebarView.setPinned(false)
+        }
         isSidebarVisible.toggle()
         isSidebarRevealRequested = false
         if !isSidebarVisible && sidebarView.requiresExpandedPanel {
@@ -412,6 +423,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
         updateSidebarWidth(animated: true)
         var settings = BrowserSettingsStore.shared.settings
         settings.showSidebarAtStartup = isSidebarVisible
+        settings.sidebarPinned = isSidebarPinned
         BrowserSettingsStore.shared.update(settings)
         TabManager.shared.persistSession()
     }
@@ -469,10 +481,11 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     }
 
     private func settingsDidChange(_ settings: BrowserSettings) {
-        if isSidebarVisible != settings.showSidebarAtStartup {
-            isSidebarVisible = settings.showSidebarAtStartup
-            updateSidebarWidth(animated: true)
-        }
+        isSidebarVisible = settings.showSidebarAtStartup
+        isSidebarPinned = settings.sidebarPinned
+        sidebarWidth = CGFloat(settings.sidebarWidth)
+        sidebarView.setPinned(isSidebarPinned)
+        updateSidebarWidth(animated: true)
         for tab in TabManager.shared.tabs where tab.webView.url?.scheme == "surffish" && tab.webView.url?.host == "newtab" {
             tab.webView.reload()
         }
@@ -502,11 +515,22 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     }
 
     private func updateSidebarWidth(animated: Bool) {
-        let expanded = isSidebarVisible || isSidebarHovered || isSidebarFocused
+        let expanded = isSidebarVisible || isSidebarPinned || isSidebarHovered || isSidebarFocused
             || isSidebarRevealRequested || sidebarView.requiresExpandedPanel
         shellLayoutModel.sidebarWidth = expanded ? sidebarWidth : collapsedSidebarWidth
         sidebarView.setCollapsed(!expanded)
         window?.contentView?.layoutSubtreeIfNeeded()
+    }
+
+    private func sidebarWidthDidChange(_ width: CGFloat) {
+        sidebarWidth = min(
+            max(width, CGFloat(BrowserSettings.minimumSidebarWidth)),
+            CGFloat(BrowserSettings.maximumSidebarWidth)
+        )
+        var settings = BrowserSettingsStore.shared.settings
+        settings.sidebarWidth = Int(sidebarWidth.rounded())
+        BrowserSettingsStore.shared.update(settings)
+        settingsViewController?.synchronizeSidebarSettings(isPinned: isSidebarPinned, width: sidebarWidth)
     }
     
     private func showExtensionInstallSheet() {
@@ -601,6 +625,15 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     public func sidebarDidQuit() { NSApp.terminate(nil) }
     public func sidebarDidRequestReveal() {
         isSidebarRevealRequested = true
+        updateSidebarWidth(animated: true)
+    }
+    public func sidebarDidTogglePinSidebar() {
+        isSidebarPinned.toggle()
+        sidebarView.setPinned(isSidebarPinned)
+        var settings = BrowserSettingsStore.shared.settings
+        settings.sidebarPinned = isSidebarPinned
+        BrowserSettingsStore.shared.update(settings)
+        settingsViewController?.synchronizeSidebarSettings(isPinned: isSidebarPinned, width: sidebarWidth)
         updateSidebarWidth(animated: true)
     }
     public func sidebarDidOpenLibraryURL(_ url: URL) {

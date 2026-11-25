@@ -20,6 +20,8 @@ public final class BrowserSettingsModel {
     public var startPage: String
     public var restoreSession: Bool
     public var showSidebarAtStartup: Bool
+    public var sidebarPinned: Bool
+    public var sidebarWidth: Double
     public var newTabTheme: NewTabTheme
     public var newTabSiteSource: NewTabSiteSource
     public var adBlockingEnabled: Bool
@@ -50,6 +52,8 @@ public final class BrowserSettingsModel {
         startPage = settings.startPage
         restoreSession = settings.restoreSession
         showSidebarAtStartup = settings.showSidebarAtStartup
+        sidebarPinned = settings.sidebarPinned
+        sidebarWidth = Double(settings.sidebarWidth)
         newTabTheme = settings.newTabTheme
         newTabSiteSource = settings.newTabSiteSource
         adBlockingEnabled = settings.adBlockingEnabled
@@ -109,6 +113,8 @@ public final class BrowserSettingsModel {
         next.startPage = url.absoluteString
         next.restoreSession = restoreSession
         next.showSidebarAtStartup = showSidebarAtStartup
+        next.sidebarPinned = sidebarPinned
+        next.sidebarWidth = min(max(Int(sidebarWidth.rounded()), BrowserSettings.minimumSidebarWidth), BrowserSettings.maximumSidebarWidth)
         next.newTabTheme = newTabTheme
         next.newTabSiteSource = newTabSiteSource
         next.adBlockingEnabled = adBlockingEnabled
@@ -282,6 +288,22 @@ public struct BrowserSettingsView: View {
                         .textFieldStyle(.roundedBorder)
                     Toggle("Restore tabs from the previous session", isOn: $model.restoreSession)
                     Toggle("Show the sidebar at startup", isOn: $model.showSidebarAtStartup)
+                    Toggle("Keep the sidebar open when the pointer leaves", isOn: $model.sidebarPinned)
+                    VStack(alignment: .leading, spacing: 5) {
+                        HStack {
+                            Text("Sidebar width")
+                            Spacer()
+                            Text("\(Int(model.sidebarWidth.rounded())) px")
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
+                        Slider(
+                            value: $model.sidebarWidth,
+                            in: Double(BrowserSettings.minimumSidebarWidth)...Double(BrowserSettings.maximumSidebarWidth),
+                            step: 10
+                        )
+                        .accessibilityLabel("Sidebar width")
+                    }
                 }
                 .padding(.top, 6)
             }

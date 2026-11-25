@@ -18,6 +18,7 @@ public protocol SidebarViewDelegate: AnyObject {
     func sidebarDidOpenExtensions()
     func sidebarDidOpenSettings()
     func sidebarDidRequestReveal()
+    func sidebarDidTogglePinSidebar()
     func sidebarDidQuit()
 }
 
@@ -38,8 +39,10 @@ private final class SidebarViewModel {
     var readingList: [BrowserReadingListEntry] = []
     var activeTabID: UUID?
     var contentMode: SidebarContentMode = .tabs
+    var searchText = ""
     var isSettingsTabActive = false
     var isExpanded = true
+    var isPinned = false
     var isFocused = false
     var onHoverChange: ((Bool) -> Void)?
     var onFocusChange: ((Bool) -> Void)?
@@ -49,6 +52,41 @@ private final class SidebarViewModel {
     var unpinnedTabs: [TabItem] { tabs.filter { !$0.isPinned } }
     var pinnedSites: [BrowserBookmark] { bookmarks.filter(\.isPinned) }
     var pinnedItemCount: Int { pinnedTabs.count + pinnedSites.count }
+
+    private func matches(_ query: String, title: String, url: String) -> Bool {
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !needle.isEmpty else { return true }
+        let host = URL(string: url)?.host ?? ""
+        return title.localizedCaseInsensitiveContains(needle)
+            || url.localizedCaseInsensitiveContains(needle)
+            || host.localizedCaseInsensitiveContains(needle)
+    }
+
+    func tabMatches(_ tab: TabItem) -> Bool {
+        matches(searchText, title: tab.webView.title ?? tab.title,
+                url: (tab.webView.url ?? tab.url)?.absoluteString ?? "")
+    }
+    func historyMatches(_ entry: BrowserHistoryEntry) -> Bool {
+        matches(searchText, title: entry.title, url: entry.url)
+    }
+    func bookmarkMatches(_ entry: BrowserBookmark) -> Bool {
+        matches(searchText, title: entry.title, url: entry.url)
+    }
+    func readingListMatches(_ entry: BrowserReadingListEntry) -> Bool {
+        matches(searchText, title: entry.title, url: entry.url)
+    }
+
+    func reorderTab(draggedID: String, onto target: TabItem) -> Bool {
+        guard let id = UUID(uuidString: draggedID),
+              let moving = tabs.first(where: { $0.id == id }),
+              moving.isPinned == target.isPinned,
+              let sourceIndex = tabs.firstIndex(where: { $0.id == id }),
+              let targetIndex = tabs.firstIndex(where: { $0.id == target.id }) else { return false }
+        let destination = targetIndex - (sourceIndex < targetIndex ? 1 : 0)
+        TabManager.shared.moveTab(id: id, to: destination)
+        refresh()
+        return true
+    }
 
     init() { refresh() }
 
@@ -123,6 +161,10 @@ public final class SidebarView: NSView {
         model.isExpanded = !collapsed
     }
 
+    public func setPinned(_ pinned: Bool) {
+        model.isPinned = pinned
+    }
+
     public func reloadTabs() { model.refresh() }
 
     public func showTabs() { model.show(.tabs) }
@@ -188,6 +230,11 @@ private struct NativeSidebarRootView: View {
 
             railButton("New tab", symbol: "plus", action: { model.delegate?.sidebarDidCreateNewTab() })
             railButton("Settings", symbol: "gearshape", action: { model.delegate?.sidebarDidOpenSettings() })
+            railButton(
+                model.isPinned ? "Auto-hide sidebar" : "Keep sidebar open",
+                symbol: model.isPinned ? "pin.fill" : "pin",
+                action: { model.delegate?.sidebarDidTogglePinSidebar() }
+            )
         }
         .padding(.horizontal, 8)
         .padding(.top, 12)
@@ -316,6 +363,30 @@ private struct NativeSidebarRootView: View {
             }
             .frame(height: 24)
 
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.tertiary)
+                TextField(searchPlaceholder, text: $model.searchText)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .focused($hasFocus)
+                    .accessibilityLabel("Search \(panelTitle.lowercased())")
+                if !model.searchText.isEmpty {
+                    Button { model.searchText = "" } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Clear search")
+                    .accessibilityLabel("Clear search")
+                }
+            }
+            .padding(.horizontal, 9)
+            .frame(height: 30)
+            .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 8))
+
             if model.contentMode == .tabs {
                 Button {
                     model.delegate?.sidebarDidCreateNewTab()
@@ -330,24 +401,25 @@ private struct NativeSidebarRootView: View {
                 .buttonStyle(.plain)
                 .focused($hasFocus)
 
-                if model.pinnedItemCount > 0 { pinnedStrip }
+                if !filteredPinnedTabs.isEmpty || !filteredPinnedSites.isEmpty { pinnedStrip }
             }
 
             ScrollView {
                 LazyVStack(spacing: 5) {
                     switch model.contentMode {
                     case .tabs:
-                        ForEach(model.unpinnedTabs) { tab in tabRow(tab) }
+                        if filteredTabs.isEmpty && filteredPinnedTabs.isEmpty && filteredPinnedSites.isEmpty && !model.isSettingsTabActive { emptyMessage(model.searchText.isEmpty ? "No tabs open" : "No tabs match ‘\(model.searchText)’") }
+                        ForEach(filteredTabs) { tab in tabRow(tab) }
                         if model.isSettingsTabActive { settingsRow }
                     case .history:
-                        if model.history.isEmpty { emptyMessage("No browsing history yet") }
-                        ForEach(model.history) { entry in historyRow(entry) }
+                        if filteredHistory.isEmpty { emptyMessage(model.searchText.isEmpty ? "No browsing history yet" : "No history matches ‘\(model.searchText)’") }
+                        ForEach(filteredHistory) { entry in historyRow(entry) }
                     case .bookmarks:
-                        if model.bookmarks.isEmpty { emptyMessage("Save a page to see it here") }
-                        ForEach(model.bookmarks) { bookmark in bookmarkRow(bookmark) }
+                        if filteredBookmarks.isEmpty { emptyMessage(model.searchText.isEmpty ? "Save a page to see it here" : "No bookmarks match ‘\(model.searchText)’") }
+                        ForEach(filteredBookmarks) { bookmark in bookmarkRow(bookmark) }
                     case .readingList:
-                        if model.readingList.isEmpty { emptyMessage("Save a page for later from the toolbar") }
-                        ForEach(model.readingList) { entry in readingListRow(entry) }
+                        if filteredReadingList.isEmpty { emptyMessage(model.searchText.isEmpty ? "Save a page for later from the toolbar" : "No reading-list items match ‘\(model.searchText)’") }
+                        ForEach(filteredReadingList) { entry in readingListRow(entry) }
                     }
                 }
                 .padding(.bottom, 6)
@@ -357,6 +429,11 @@ private struct NativeSidebarRootView: View {
             Spacer(minLength: 0)
 
             HStack(spacing: 8) {
+                footerButton(
+                    model.isPinned ? "Auto-hide" : "Keep open",
+                    symbol: model.isPinned ? "pin.fill" : "pin",
+                    action: { model.delegate?.sidebarDidTogglePinSidebar() }
+                )
                 footerButton("Settings", symbol: "gearshape", action: { model.delegate?.sidebarDidOpenSettings() })
                 footerButton("Quit", symbol: "power", action: { model.delegate?.sidebarDidQuit() })
             }
@@ -377,33 +454,54 @@ private struct NativeSidebarRootView: View {
         }
     }
 
+    private var searchPlaceholder: String {
+        switch model.contentMode {
+        case .tabs: return "Search tabs"
+        case .history: return "Search history"
+        case .bookmarks: return "Search bookmarks"
+        case .readingList: return "Search reading list"
+        }
+    }
+
+    private var filteredTabs: [TabItem] { model.unpinnedTabs.filter(model.tabMatches) }
+    private var filteredPinnedTabs: [TabItem] { model.pinnedTabs.filter(model.tabMatches) }
+    private var filteredPinnedSites: [BrowserBookmark] { model.pinnedSites.filter(model.bookmarkMatches) }
+    private var filteredHistory: [BrowserHistoryEntry] { model.history.filter(model.historyMatches) }
+    private var filteredBookmarks: [BrowserBookmark] { model.bookmarks.filter(model.bookmarkMatches) }
+    private var filteredReadingList: [BrowserReadingListEntry] { model.readingList.filter(model.readingListMatches) }
+
     private var pinnedStrip: some View {
         ScrollView(.horizontal) {
             HStack(spacing: 6) {
-                ForEach(model.pinnedSites) { bookmark in
+                ForEach(filteredPinnedSites) { bookmark in
                     Button {
                         guard let url = URL(string: bookmark.url) else { return }
                         model.delegate?.sidebarDidOpenLibraryURL(url)
                     } label: {
-                        pinMark(title: bookmark.title, symbol: "globe", isClusterTarget: bookmark.id == model.pinnedSites.first?.id)
+                        pinMark(title: bookmark.title, symbol: "globe", isClusterTarget: bookmark.id == filteredPinnedSites.first?.id)
                     }
                     .buttonStyle(.plain)
                     .help(bookmark.title.isEmpty ? bookmark.url : bookmark.title)
                     .accessibilityLabel(bookmark.title.isEmpty ? "Pinned site" : bookmark.title)
                 }
-                ForEach(model.pinnedTabs) { tab in
+                ForEach(filteredPinnedTabs) { tab in
                     Button {
                         model.delegate?.sidebarDidSelectTab(id: tab.id)
                     } label: {
                         pinMark(
                             title: tab.title,
                             symbol: "pin.fill",
-                            isClusterTarget: model.pinnedSites.isEmpty && tab.id == model.pinnedTabs.first?.id
+                            isClusterTarget: filteredPinnedSites.isEmpty && tab.id == filteredPinnedTabs.first?.id
                         )
                     }
                     .buttonStyle(.plain)
                     .help(tab.title.isEmpty ? "Pinned tab" : tab.title)
                     .accessibilityLabel(tab.title.isEmpty ? "Pinned tab" : tab.title)
+                    .draggable(tab.id.uuidString)
+                    .dropDestination(for: String.self) { items, _ in
+                        guard let draggedID = items.first else { return false }
+                        return model.reorderTab(draggedID: draggedID, onto: tab)
+                    }
                 }
             }
             .padding(.horizontal, 2)
@@ -482,6 +580,11 @@ private struct NativeSidebarRootView: View {
                 .matchedGeometryEffect(id: "tab-\(tab.id)", in: morphNamespace)
         }
         .contentShape(RoundedRectangle(cornerRadius: 9))
+        .draggable(tab.id.uuidString)
+        .dropDestination(for: String.self) { items, _ in
+            guard let draggedID = items.first else { return false }
+            return model.reorderTab(draggedID: draggedID, onto: tab)
+        }
         .focused($hasFocus)
         .contextMenu {
             Button("Duplicate Tab") { model.delegate?.sidebarDidDuplicateTab(id: tab.id) }
