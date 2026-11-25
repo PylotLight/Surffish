@@ -132,9 +132,7 @@ public final class BrowserSettingsWindowController: NSWindowController {
         BrowserSettingsStore.shared.update(next)
         Task {
             await SshTunnelManager.shared.configure(enabled: next.sshProxyEnabled, target: next.sshHost)
-            await MainActor.run {
-                self?.sshStatus.stringValue = SshTunnelManager.shared.status
-            }
+            sshStatus.stringValue = SshTunnelManager.shared.status
         }
         window?.close()
     }
