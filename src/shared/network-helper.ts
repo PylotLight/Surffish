@@ -105,8 +105,8 @@ export function describeSshTunnelStatus(
   if (status.running) {
     return {
       state: "connected",
-      title: "SSH session connected",
-      detail: `Connected to ${status.target}${status.client === "system" ? " with system OpenSSH" : ""}; Surffish and other apps use SOCKS5 at ${SURFFISH_NETWORK_HELPER.host}:${status.port ?? "the configured port"}.`,
+      title: `Connected to ${status.target}`,
+      detail: `Surffish and other apps use SOCKS5 at ${SURFFISH_NETWORK_HELPER.host}:${status.port ?? "the configured port"}${status.client === "system" ? " (system OpenSSH)" : ""}.`,
     };
   }
   if (status.error) {
