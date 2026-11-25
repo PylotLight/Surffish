@@ -22,13 +22,11 @@ public struct SavedBrowserSession: Codable {
     public let version: Int
     public let tabs: [SavedBrowserTab]
     public let activeTabID: UUID?
-    public let sidebarVisible: Bool
 
-    public init(tabs: [SavedBrowserTab], activeTabID: UUID?, sidebarVisible: Bool) {
+    public init(tabs: [SavedBrowserTab], activeTabID: UUID?) {
         self.version = 1
         self.tabs = tabs
         self.activeTabID = activeTabID
-        self.sidebarVisible = sidebarVisible
     }
 }
 
