@@ -3,6 +3,10 @@ import AppKit
 @MainActor
 public final class BrowserSettingsViewController: NSViewController {
     public var onClose: (() -> Void)?
+    public var onInstallExtension: (() -> Void)?
+
+    private let installedExtensionsStack = NSStackView()
+    private let extensionStatus = NSTextField(labelWithString: "")
 
     private let searchEngine = NSPopUpButton()
     private let startPage = NSTextField()
@@ -23,6 +27,8 @@ public final class BrowserSettingsViewController: NSViewController {
         view = root
         buildInterface()
         loadSettings()
+        refreshExtensions()
+        WebExtensionManager.shared.onExtensionsChanged = { [weak self] _ in self?.refreshExtensions() }
     }
 
     private func buildInterface() {
@@ -37,6 +43,18 @@ public final class BrowserSettingsViewController: NSViewController {
         searchEngine.widthAnchor.constraint(equalToConstant: 220).isActive = true
         startPage.placeholderString = "https://online.bonjourr.fr/"
         startPage.widthAnchor.constraint(equalToConstant: 440).isActive = true
+
+        let extensionsHeading = NSTextField(labelWithString: "Extensions")
+        extensionsHeading.font = .systemFont(ofSize: 17, weight: .semibold)
+        let installExtensionButton = NSButton(title: "Install extension…", target: self, action: #selector(installExtension))
+        installExtensionButton.bezelStyle = .rounded
+        let extensionDescription = NSTextField(wrappingLabelWithString: "Manage extensions installed in this Surffish profile. Remove an extension here; use Option-click or right-click its toolbar icon for quick actions.")
+        extensionDescription.textColor = .secondaryLabelColor
+        extensionDescription.maximumNumberOfLines = 2
+        installedExtensionsStack.orientation = .vertical
+        installedExtensionsStack.alignment = .leading
+        installedExtensionsStack.spacing = 8
+        extensionStatus.textColor = .secondaryLabelColor
 
         let connectionHeading = NSTextField(labelWithString: "Connection")
         connectionHeading.font = .systemFont(ofSize: 17, weight: .semibold)
@@ -86,6 +104,11 @@ public final class BrowserSettingsViewController: NSViewController {
             makeRow(title: "New tab page", control: startPage),
             restoreSession,
             showSidebar,
+            extensionsHeading,
+            extensionDescription,
+            installExtensionButton,
+            extensionStatus,
+            installedExtensionsStack,
             connectionHeading,
             sshProxyEnabled,
             makeRow(title: "SSH host", control: sshHostControls),
@@ -130,6 +153,61 @@ public final class BrowserSettingsViewController: NSViewController {
         row.alignment = .centerY
         row.spacing = 16
         return row
+    }
+
+    @objc private func installExtension() { onInstallExtension?() }
+
+    private func refreshExtensions() {
+        installedExtensionsStack.arrangedSubviews.forEach { view in
+            installedExtensionsStack.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+        let extensions = WebExtensionManager.shared.loadedExtensions
+        extensionStatus.stringValue = extensions.isEmpty ? "No extensions installed" : "\(extensions.count) installed"
+        for item in extensions {
+            let name = NSTextField(labelWithString: "\(item.name)  ·  v\(item.version)")
+            name.font = .systemFont(ofSize: 13, weight: .medium)
+            let details = NSTextField(labelWithString: item.hasPopup ? "Toolbar popup available" : "Background / options extension")
+            details.font = .systemFont(ofSize: 11)
+            details.textColor = .secondaryLabelColor
+            let remove = NSButton(title: "Uninstall", target: self, action: #selector(uninstallExtension(_:)))
+            remove.bezelStyle = .rounded
+            remove.tag = extensions.firstIndex(where: { $0.id == item.id }) ?? 0
+            let row = NSStackView(views: [name, NSView(), remove])
+            row.orientation = .horizontal
+            row.alignment = .centerY
+            row.distribution = .fill
+            row.widthAnchor.constraint(equalToConstant: 560).isActive = true
+            let group = NSStackView(views: [row, details])
+            group.orientation = .vertical
+            group.alignment = .leading
+            group.spacing = 3
+            installedExtensionsStack.addArrangedSubview(group)
+        }
+        if extensions.isEmpty {
+            let empty = NSTextField(labelWithString: "Install Bramble or another compatible WebExtension to get started.")
+            empty.textColor = .secondaryLabelColor
+            installedExtensionsStack.addArrangedSubview(empty)
+        }
+    }
+
+    @objc private func uninstallExtension(_ sender: NSButton) {
+        let extensions = WebExtensionManager.shared.loadedExtensions
+        guard sender.tag >= 0, sender.tag < extensions.count else { return }
+        let item = extensions[sender.tag]
+        let alert = NSAlert()
+        alert.messageText = "Uninstall \(item.name)?"
+        alert.informativeText = "The extension will be unloaded and removed from this Surffish profile."
+        alert.addButton(withTitle: "Uninstall")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        Task {
+            do {
+                try await WebExtensionManager.shared.uninstallExtension(id: item.id)
+            } catch {
+                showValidationAlert(title: "Could not uninstall extension", message: error.localizedDescription)
+            }
+        }
     }
 
     private func loadSettings() {
