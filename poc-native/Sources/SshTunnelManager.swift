@@ -16,6 +16,9 @@ public final class SshTunnelManager {
     private var stderrText = ""
     private var target = ""
     private var enabled = false
+    private var browserEnabled = false
+    private var bindAddress = "127.0.0.1"
+    private var configuredPort: UInt16 = 1080
     private var generation = 0
     private var reconnectAttempt = 0
     private var reconnectTask: Task<Void, Never>?
@@ -25,16 +28,29 @@ public final class SshTunnelManager {
 
     private init() {}
 
-    public func configure(enabled: Bool, target: String) async {
-        self.enabled = enabled
+    public func configure(
+        browserEnabled: Bool,
+        serverEnabled: Bool,
+        target: String,
+        port: Int,
+        bindAddress: String
+    ) async {
+        self.browserEnabled = browserEnabled
+        self.enabled = browserEnabled || serverEnabled
         self.target = target.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.bindAddress = bindAddress
+        guard (1...65535).contains(port), let validPort = UInt16(exactly: port) else {
+            updateStatus("SOCKS5 port must be between 1 and 65535")
+            return
+        }
+        self.configuredPort = validPort
         generation += 1
         reconnectAttempt = 0
         reconnectTask?.cancel()
         reconnectTask = nil
         await stopProcess()
 
-        guard enabled else {
+        guard self.enabled else {
             proxyPort = nil
             applyProxyToBrowserStores(port: nil)
             TabManager.shared.reloadAllTabs()
@@ -43,9 +59,13 @@ public final class SshTunnelManager {
         }
 
         guard !self.target.isEmpty else {
-            proxyPort = 1
-            applyProxyToBrowserStores(port: 1)
-            updateStatus("Enter an SSH host alias or user@host · traffic remains blocked")
+            proxyPort = browserEnabled ? 1 : nil
+            applyProxyToBrowserStores(port: browserEnabled ? 1 : nil)
+            updateStatus("Enter an SSH host alias or user@host")
+            return
+        }
+        guard ["127.0.0.1", "0.0.0.0"].contains(bindAddress) else {
+            updateStatus("SOCKS5 bind address must be 127.0.0.1 or 0.0.0.0")
             return
         }
 
@@ -86,19 +106,21 @@ public final class SshTunnelManager {
         updateStatus("Connecting to \(target)…")
 
         do {
-            let port = try Self.allocateLoopbackPort()
+            let port = configuredPort
             proxyPort = port
 
             // Install the proxy before launching SSH. If the tunnel fails, WebKit continues
             // pointing at this loopback endpoint and cannot silently fall back to a direct route.
-            applyProxyToBrowserStores(port: port)
-            TabManager.shared.reloadAllTabs()
+            applyProxyToBrowserStores(port: browserEnabled ? port : nil)
+            if browserEnabled { TabManager.shared.reloadAllTabs() }
 
             let child = Process()
             child.executableURL = executableURL
             child.arguments = [
                 "-N",
-                "-D", "127.0.0.1:\(port)",
+                bindAddress == "0.0.0.0" ? "-g" : "-N",
+                "-N",
+                "-D", "\(bindAddress):\(port)",
                 "-o", "ExitOnForwardFailure=yes",
                 "-o", "BatchMode=yes",
                 "-o", "ServerAliveInterval=30",
@@ -153,8 +175,8 @@ public final class SshTunnelManager {
                     let listening = await Self.isListening(port: port)
                     if listening {
                         reconnectAttempt = 0
-                        updateStatus("Connected · 127.0.0.1:\(port)")
-                        TabManager.shared.reloadAllTabs()
+                        updateStatus("SOCKS5 ready · \(bindAddress):\(port) via \(target)")
+                        if browserEnabled { TabManager.shared.reloadAllTabs() }
                         return
                     }
                 }
@@ -224,14 +246,18 @@ public final class SshTunnelManager {
             "bad owner or permissions",
             "invalid format",
             "no such identity",
-            "too many authentication failures"
+            "too many authentication failures",
+            "address already in use",
+            "cannot listen to port",
+            "could not request local forwarding"
         ]
         return !permanentFailures.contains(where: { message.contains($0) })
     }
 
     private func applyProxyToBrowserStores(port: UInt16?) {
-        WebKitProxyController.apply(port: port)
-        TabManager.shared.applyProxyConfiguration(port: port)
+        let browserPort = browserEnabled ? port : nil
+        WebKitProxyController.apply(port: browserPort)
+        TabManager.shared.applyProxyConfiguration(port: browserPort)
     }
 
     private func updateStatus(_ value: String) {
@@ -273,41 +299,6 @@ public final class SshTunnelManager {
         } catch {
             return nil
         }
-    }
-
-    private static func allocateLoopbackPort() throws -> UInt16 {
-        let descriptor = socket(AF_INET, SOCK_STREAM, 0)
-        guard descriptor >= 0 else {
-            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
-        }
-        defer { close(descriptor) }
-
-        var address = sockaddr_in()
-        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
-        address.sin_family = sa_family_t(AF_INET)
-        address.sin_port = 0
-        address.sin_addr = in_addr(s_addr: inet_addr("127.0.0.1"))
-
-        let bindResult = withUnsafePointer(to: &address) {
-            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                bind(descriptor, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
-            }
-        }
-        guard bindResult == 0 else {
-            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
-        }
-
-        var assigned = sockaddr_in()
-        var length = socklen_t(MemoryLayout<sockaddr_in>.size)
-        let result = withUnsafeMutablePointer(to: &assigned) {
-            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                getsockname(descriptor, $0, &length)
-            }
-        }
-        guard result == 0 else {
-            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
-        }
-        return UInt16(bigEndian: assigned.sin_port)
     }
 
     private static func isListening(port: UInt16) async -> Bool {
