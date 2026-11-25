@@ -256,7 +256,7 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
         close.toolTip = "Close tab"
         close.tag = row
         close.translatesAutoresizingMaskIntoConstraints = false
-        close.isHidden = isCollapsed
+        close.isHidden = true
         cell.addSubview(close)
 
         let pin = NSButton(image: NSImage(systemSymbolName: tab.isPinned ? "pin.slash" : "pin", accessibilityDescription: "Toggle pin")!, target: self, action: #selector(onPinTabClicked(_:)))
@@ -265,7 +265,7 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
         pin.toolTip = tab.isPinned ? "Unpin tab" : "Pin tab"
         pin.tag = row
         pin.translatesAutoresizingMaskIntoConstraints = false
-        pin.isHidden = isCollapsed || !active
+        pin.isHidden = true
         cell.addSubview(pin)
 
         var iconConstraints: [NSLayoutConstraint] = [
