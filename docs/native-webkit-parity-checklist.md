@@ -4,7 +4,7 @@
 **Native reference:** PR #347's feature branch, including the changes in this parity pass. The native implementation is Swift/AppKit/WebKit/Network.framework for macOS 26+ arm64; it is intentionally not an Electron/Chromium port.  
 **Roadmap:** [`native-webkit-mvp-roadmap.md`](native-webkit-mvp-roadmap.md).
 
-Status labels distinguish code from verified parity: **Implemented in this pass (build/QA pending)** means source changes are present but the native macOS build and interactive behavior have not yet been verified; **Partial** means a useful native foundation exists but important Electron behavior is missing; **Missing** means no equivalent is present; **Native alternative required** means a Chromium feature must not be represented as a direct WebKit port.
+Status labels distinguish code from verified parity: **Implemented in this pass (macOS build passed; runtime QA pending)** means source changes are present and the macOS 26 arm64 build has passed, but interactive behavior still needs macOS runtime validation; **Partial** means a useful native foundation exists but important Electron behavior is missing; **Missing** means no equivalent is present; **Native alternative required** means a Chromium feature must not be represented as a direct WebKit port.
 
 ## Snapshot
 
@@ -25,15 +25,15 @@ This is a substantial M1 usability slice, not full Electron parity. The pass add
 
 - **Back, forward, reload/stop and load progress — Partial.** The native toolbar wires these to `WKWebView`; navigation history menus, richer error handling and full Electron behavior are absent.
 - **Address parsing and search engine — Partial.** The native omnibox supports basic URL-versus-search routing and a saved search engine. It lacks Electron's suggestion matching across tabs/history/bookmarks, keyword search indicators, robust navigation parsing and suggestion keyboard flow.
-- **Built-in New Tab route — Implemented in this pass (build/QA pending).** New tabs default to `surffish://newtab/`, served locally by `BrowserNewTabSchemeHandler`; the page uses the profile's selected search engine, shows the clock/date, and prefers pinned sites, then recent history, then bookmarks. Private tabs omit recent history. The page has no remote dependency.
+- **Built-in New Tab route — Implemented in this pass (macOS build passed; runtime QA pending).** New tabs default to `surffish://newtab/`, served locally by `BrowserNewTabSchemeHandler`; the page uses the profile's selected search engine, shows the clock/date, and prefers pinned sites, then recent history, then bookmarks. Private tabs omit recent history. The page has no remote dependency.
 - **New Tab customization — Partial.** The first-party page covers the basic dashboard, not Electron's customizable shortcuts, quick-link preferences, local/remote photo backgrounds and refresh/cache behavior, or weather/location/providers. See [Electron New Tab background handling](https://github.com/PylotLight/Surffish/blob/fbabc6aa03ba3b39eee92ed4388c39fa919f3b87/src/main/new-tab-backgrounds.ts), [weather handling](https://github.com/PylotLight/Surffish/blob/fbabc6aa03ba3b39eee92ed4388c39fa919f3b87/src/main/new-tab-weather.ts), and [renderer New Tab state](https://github.com/PylotLight/Surffish/blob/fbabc6aa03ba3b39eee92ed4388c39fa919f3b87/src/renderer/src/views/Browser.tsx).
 
 ### Tabs, navigation history and session
 
 - **Create, select, close and pin tabs — Partial.** Core AppKit/WebKit tab management and saved tab metadata exist; pinned tabs have a strip. Drag sorting, multi-selection, batch operations, complete tab overview/search, audio/mute indicators and richer tab navigation history are not complete.
-- **Duplicate tab — Implemented in this pass (build/QA pending).** The active tab and normal tab context menu can duplicate a tab, preserving private state, pin state and group/Space metadata.
-- **Reopen closed tab — Implemented in this pass (build/QA pending).** The menu/shortcut can reopen a bounded in-memory stack of up to 20 non-private tabs. The stack is intentionally not persisted across app relaunches; private tabs are excluded.
-- **Find in page — Implemented in this pass (build/QA pending).** A native find bar uses Apple's Swift `WKWebView.find(_:configuration:)` API with `caseSensitive = false` and wrapping, previous/next, Escape and a simple found/no-match status. Match counts and broader Electron find UX are not implemented.
+- **Duplicate tab — Implemented in this pass (macOS build passed; runtime QA pending).** The active tab and normal tab context menu can duplicate a tab, preserving private state, pin state and group/Space metadata.
+- **Reopen closed tab — Implemented in this pass (macOS build passed; runtime QA pending).** The menu/shortcut can reopen a bounded in-memory stack of up to 20 non-private tabs. The stack is intentionally not persisted across app relaunches; private tabs are excluded.
+- **Find in page — Implemented in this pass (macOS build passed; runtime QA pending).** A native find bar uses Apple's Swift `WKWebView.find(_:configuration:)` API with `caseSensitive = false` and wrapping, previous/next, Escape and a simple found/no-match status. Match counts and broader Electron find UX are not implemented.
 - **Groups and Spaces — Partial.** Native tab models persist group/Space metadata, but the Electron interaction model, group management, Space switching and split view are not present.
 - **Session restore and window lifecycle — Partial.** A profile-local session can restore tabs and active selection, but restored tabs load eagerly. Geometry, multiple windows, robust lifecycle/crash recovery, lazy restore and deferred persistence remain roadmap work.
 - **Private browsing — Partial.** Private tabs use non-persistent WebKit stores and are excluded from saved sessions/history; this pass also excludes private tabs from reopen-closed history and hides recent history on their New Tab. Private-window isolation and complete data-deletion guarantees still need runtime verification.
@@ -43,7 +43,7 @@ This is a substantial M1 usability slice, not full Electron parity. The pass add
 - **Bookmarks — Partial.** Profile-local add/remove and a sidebar list exist. This pass adds backward-compatible `isPinned` persistence, pin/unpin context actions and a pinned-site strip. Folder hierarchy, manager, reorder, imports and broad search/sort are absent.
 - **History — Partial.** Profile-local history, private exclusion and clear-all exist. Search, time/site clearing, retention controls and back/forward history menus remain missing.
 - **Reading list — Missing.** Electron's saved-for-later/unread surface has no native store or panel.
-- **Bookmark pin migration — Implemented in this pass (build/QA pending).** Older JSON bookmark records that lack `isPinned` decode as unpinned rather than failing the library snapshot.
+- **Bookmark pin migration — Implemented in this pass (macOS build passed; runtime QA pending).** Older JSON bookmark records that lack `isPinned` decode as unpinned rather than failing the library snapshot.
 
 ### Settings, privacy and site controls
 
@@ -88,6 +88,8 @@ The following Electron capabilities require native alternatives or an explicit c
 ## Verification status for this pass
 
 - Focused source-contract suite: `node --test scripts/native-poc-ui-contract.test.cjs` — 7 tests passed in the current workspace.
-- Native Swift/AppKit/WebKit compilation: not available on this Linux host; the macOS 26 arm64 workflow is the build authority.
+- [Native macOS 26 arm64 build](https://github.com/PylotLight/Surffish/actions/runs/45620765079) passed on the corrected feature head; the contract-test and `Build native browser` steps both succeeded.
+- [Automatic PR CI](https://github.com/PylotLight/Surffish/actions/runs/45620751445) passed: 9 successful checks, 2 skipped, 0 pending. Linux B also passed on this rerun.
+- Native Swift/AppKit/WebKit compilation is not available on this Linux host; the macOS 26 arm64 workflow above is the build authority.
 - Interactive AppKit/WebKit behavior: not verified here; it requires macOS 26+ runtime QA.
 - The checklist is anchored to the exact Electron commit above. It is not a claim that all Electron features are applicable or complete in the native app.
