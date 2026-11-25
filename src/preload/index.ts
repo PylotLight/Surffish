@@ -110,6 +110,28 @@ import type {
 const api = {
   platform: process.platform,
   browser: {
+    onWindowFullscreen: (
+      callback: (
+        fullscreen: boolean,
+        nativeFullscreen: boolean,
+        htmlFullscreen: boolean,
+      ) => void,
+    ): (() => void) => {
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        fullscreen: boolean,
+        nativeFullscreen: boolean,
+        htmlFullscreen: boolean,
+      ): void => callback(fullscreen, nativeFullscreen, htmlFullscreen);
+      ipcRenderer.on("browser:window-fullscreen", listener);
+      return () =>
+        ipcRenderer.removeListener("browser:window-fullscreen", listener);
+    },
+    getWindowFullscreenState: (): Promise<{
+      windowFullscreen: boolean;
+      nativeFullscreen: boolean;
+      htmlFullscreen: boolean;
+    }> => ipcRenderer.invoke("browser:window-fullscreen-state"),
     quit: (): Promise<void> => ipcRenderer.invoke("app:quit"),
     windowControl: (
       action: "close" | "minimize" | "toggle-zoom",
@@ -500,6 +522,9 @@ const api = {
       return () =>
         ipcRenderer.removeListener("browser:focus-address", listener);
     },
+    /** Give this shell surface the keyboard (a New Tab's restored address bar draft). */
+    focusAddressSurface: (): Promise<boolean> =>
+      ipcRenderer.invoke("browser:focus-address-surface"),
     /** Safety pack: tab recovery, spellcheck, privacy / site data, HTTPS-only, proxy kill switch. */
     safety: {
       tabRecovery: (

@@ -632,6 +632,7 @@ export default function Browser({
   );
   const activeSuggestionIndex = omniboxPreview ? omniboxPreview.index : -1;
   const omniboxCaretToEndRef = useRef(false);
+  const restoringAddressFocusRef = useRef(false);
   const [searchEngine, setSearchEngine] = useState<SearchEngineId>(
     DEFAULT_SEARCH_ENGINE,
   );
@@ -818,7 +819,8 @@ export default function Browser({
     if (!resize || resize.pointerId !== event.pointerId) return;
     sidebarResizeRef.current = null;
     persistSidebarWidth(resize.width);
-    if (!sidebarPinned && event.clientX >= resize.width) scheduleSidebarHide();
+    if (!sidebarPinned && event.clientX >= resize.width)
+      scheduleSidebarHide(event);
   }
 
   function handleSidebarResizeKeyDown(
@@ -879,7 +881,13 @@ export default function Browser({
   }
 
   function setSidebarHovered(next: boolean): void {
-    updateChromeState({ sidebarHovered: next });
+    // The sidebar labels/pins live in a separate renderer from the native live-page view. Let main
+    // lay out the native sidebar/backdrop/page first; expanding local CSS optimistically exposes
+    // page pixels beyond the still-collapsed native overlay for at least one compositor frame.
+    void window.api.browser.chrome
+      .set({ sidebarHovered: next })
+      .then(setChromeState)
+      .catch(() => undefined);
   }
 
   function setSidebarFocused(next: boolean): void {
@@ -1546,14 +1554,31 @@ export default function Browser({
     // so it's still over the sidebar: don't treat that as the user leaving.
     if (pointerIsOverSidebar(event.clientX, event.clientY)) return;
     sidebarPointerInsideRef.current = false;
-    scheduleSidebarHide();
+    scheduleSidebarHide(event);
   }
 
-  function scheduleSidebarHide(): void {
+  function scheduleSidebarHide(pointer?: {
+    clientX: number;
+    clientY: number;
+  }): void {
+    if (surface === "sidebar") {
+      // The native WebContentsView can move or resize beneath a stationary pointer. Its renderer
+      // may report a synthetic leave during that compositor change; main checks the screen cursor
+      // against the live native bounds and owns auto-hide for this surface.
+      sidebarPointerInsideRef.current = false;
+      return;
+    }
     if (sidebarResizeRef.current) return;
     if (sidebarHideTimerRef.current) clearTimeout(sidebarHideTimerRef.current);
     sidebarHideTimerRef.current = setTimeout(() => {
       sidebarHideTimerRef.current = null;
+      // A native WebContentsView can grow under a stationary cursor without a new
+      // mouseenter. Check the leave point against the card's current bounds so an
+      // old leave cannot close the panel after its moving edge has passed the cursor.
+      if (pointer && pointerIsOverSidebar(pointer.clientX, pointer.clientY)) {
+        sidebarPointerInsideRef.current = true;
+        return;
+      }
       setSidebarHovered(false);
     }, 180);
   }
@@ -2258,6 +2283,15 @@ export default function Browser({
     if (!element) return;
     const updateBounds = (): void => {
       const rect = element.getBoundingClientRect();
+      // The in-page sidebar starts at the toolbar's bottom line, where the overlay sidebar view
+      // starts (main: the browser frame), and at the window top in fullscreen (the toolbar hides).
+      const layout = element.closest<HTMLElement>(".browser-layout");
+      const frameTop = `${Math.max(0, Math.round(rect.top))}px`;
+      if (
+        layout &&
+        layout.style.getPropertyValue("--sidebar-frame-top") !== frameTop
+      )
+        layout.style.setProperty("--sidebar-frame-top", frameTop);
       const canShow =
         sidebarMode !== "downloads" &&
         sidebarMode !== "bookmarks" &&
@@ -2292,6 +2326,39 @@ export default function Browser({
     setNavigationError("");
   }, [activeTabId]);
 
+  // Each tab keeps its own unsubmitted text (shared/omnibox-drafts), as in Chrome and Arc.
+  const draftTabs = useMemo(
+    () =>
+      tabs.map((tab) => ({
+        id: tab.id,
+        display: addressDisplayValue(
+          tab.url,
+          tab.url === SURFFISH_QUICK_LINKS_URL,
+        ),
+      })),
+    [tabs],
+  );
+  const restoreAddressFocus = useCallback(
+    (input: HTMLInputElement, placeCaret: () => void) => {
+      // Back on a New Tab with half-typed text: keyboard into the bar, caret where it was, and no
+      // select-all or suggestions dropdown. The focus handler skips both while this is set, which
+      // covers the input's own focus and the one Chromium fires again when the surface takes the
+      // keyboard from main.
+      restoringAddressFocusRef.current = true;
+      input.focus({ preventScroll: true });
+      placeCaret();
+      void window.api.browser
+        .focusAddressSurface()
+        .catch(() => false)
+        .then(() => {
+          placeCaret();
+          window.setTimeout(() => {
+            restoringAddressFocusRef.current = false;
+          }, 50);
+        });
+    },
+    [],
+  );
   // The tab URL wins unless the user is really typing (activeElement alone sticks when focus moves to another view).
   const addressSync = useAddressBarSync({
     inputRef: addressRef,
@@ -2299,6 +2366,8 @@ export default function Browser({
     setAddress,
     displayUrl: addressDisplayValue(browser.url, isLocalNewTab),
     tabKey: activeTabId,
+    tabs: draftTabs,
+    onRestoreFocus: restoreAddressFocus,
   });
   // After arrowing (or Esc back to the typed text), caret at the end with nothing selected, so the
   // next keystroke edits the text instead of replacing it.
@@ -2331,6 +2400,7 @@ export default function Browser({
     ) {
       if (hadPrerenderHint) window.api.browser.preconnect.typingEnded();
       setNavigationError("");
+      addressSync.clearDraft();
       addressRef.current?.blur();
       return;
     }
@@ -2421,6 +2491,7 @@ export default function Browser({
         setOmniboxPreview(null);
         omniboxCaretToEndRef.current = true;
         setAddress(escape.text);
+        addressSync.rememberDraft(escape.text);
         return;
       }
       // Like Chrome: Esc drops the dropdown and any half-typed text, leaving the real URL selected.
@@ -2459,6 +2530,7 @@ export default function Browser({
     setOmniboxPreview(next.preview);
     omniboxCaretToEndRef.current = true;
     setAddress(next.text);
+    addressSync.rememberDraft(next.text);
   }
 
   async function saveProxy(): Promise<void> {
@@ -2609,7 +2681,7 @@ export default function Browser({
 
   return (
     <section
-      className={`browser-layout${sidebarVisible ? " is-sidebar-visible" : ""}${sidebarOnScreen ? "" : " is-sidebar-motion-paused"}${sidebarResizing ? " is-sidebar-resizing" : ""}`}
+      className={`browser-layout${sidebarVisible ? " is-sidebar-visible" : ""}${(sidebarMode === "tabs" || sidebarMode === "history") && sidebarPinned ? " is-sidebar-docked" : ""}${sidebarOnScreen ? "" : " is-sidebar-motion-paused"}${sidebarResizing ? " is-sidebar-resizing" : ""}`}
       style={{ "--sidebar-width": `${sidebarWidth}px` } as React.CSSProperties}
       aria-label="Surffish browser"
       onMouseMove={(event) => {
@@ -2641,6 +2713,11 @@ export default function Browser({
         setSidebarMode={setSidebarMode}
         setSidebarPinned={setSidebarPinned}
         sidebarOnScreen={sidebarOnScreen}
+        sidebarVisible={sidebarVisible}
+        railOnScreen={
+          surface === "sidebar" ||
+          (surface === "content" && (isLocalPage || sidebarOnScreen))
+        }
         spaces={spaces}
         tabUsage={tabUsage}
         settingsTab={settingsTab}
@@ -2989,6 +3066,7 @@ export default function Browser({
                   onChange={(event) => {
                     // Typing (including editing a filled-in suggestion) makes this the new query.
                     setAddress(event.target.value);
+                    addressSync.rememberDraft(event.target.value, event.target);
                     setNavigationError("");
                     setSuggestionsOpen(true);
                     setOmniboxPreview(null);
@@ -3006,6 +3084,8 @@ export default function Browser({
                   }}
                   onFocus={(event) => {
                     setOmniboxPreview(null);
+                    // A restored per-tab draft keeps its caret and leaves the dropdown closed.
+                    if (restoringAddressFocusRef.current) return;
                     event.currentTarget.select();
                     setSuggestionsOpen(true);
                     if (historyStaleRef.current) void refreshHistory();
@@ -3704,7 +3784,7 @@ export default function Browser({
                               >
                                 {frequentlyVisitedSites.map((site) => (
                                   <NewTabSiteIcon
-                                    key={site.origin}
+                                    key={site.url}
                                     site={site}
                                     faviconUrl={
                                       cachedSiteIcons[site.origin] ??
@@ -3736,7 +3816,7 @@ export default function Browser({
                             >
                               {favoriteSites.map((site) => (
                                 <NewTabSiteIcon
-                                  key={site.origin}
+                                  key={site.url}
                                   site={site}
                                   faviconUrl={
                                     cachedSiteIcons[site.origin] ??

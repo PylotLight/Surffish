@@ -4,6 +4,7 @@ import type {
   BrowsingHistoryEntry,
   PinnedSite,
 } from "../../../../shared/types";
+import { useLayoutEffect, useMemo, useRef } from "react";
 import type {
   Dispatch,
   FocusEvent,
@@ -16,6 +17,15 @@ import { usePinnedDragSort, usePinReorderModifier } from "../usePinnedDragSort";
 import { useTabDragSort } from "../useTabDragSort";
 import { useTabSelection } from "../tab-groups/useTabSelection";
 import type { SidebarBackdropState } from "../../../../shared/sidebar-backdrop";
+import {
+  MORPH_COLUMN_CLASS,
+  MORPH_HIDDEN_CLASS,
+  MORPH_RESHAPE_MS,
+  captureSidebarMorph,
+  playSidebarMorph,
+  settleSidebarMorph,
+  type MorphSnapshot,
+} from "../../../../shared/sidebar-morph";
 import type { SpacesSnapshot } from "../../../../shared/spaces";
 import type { TabEntry } from "../../../../shared/split-view";
 import type { TabGroupHeaderEntry } from "../../../../shared/tab-groups";
@@ -47,6 +57,7 @@ import { UpdateBadge } from "../settings/UpdateBadge";
 import { ArchivedTabsSidebar } from "../lazy-views";
 import { SpacesSwitcher } from "../spaces/SpacesSwitcher";
 import { TabCastBadge } from "../cast/CastButton";
+import { SidebarRail } from "./SidebarRail";
 import type { BrowserSurface, SidebarMode } from "./chrome-helpers";
 
 export interface SidebarProps {
@@ -74,6 +85,10 @@ export interface SidebarProps {
   setSidebarMode: Dispatch<SetStateAction<SidebarMode>>;
   setSidebarPinned: Dispatch<SetStateAction<boolean>>;
   sidebarOnScreen: boolean;
+  /** Whether the panel is open (pinned, hovered, focused, or a full panel mode). */
+  sidebarVisible: boolean;
+  /** Whether this surface's rail is painted (the overlay view is up, or this is the visible layer). */
+  railOnScreen: boolean;
   spaces: SpacesSnapshot | null;
   tabUsage: Record<string, DiagnosticsTabUsage>;
   settingsTab: BrowserState["settings"];
@@ -131,6 +146,8 @@ export function Sidebar(props: SidebarProps) {
     setSidebarMode,
     setSidebarPinned,
     sidebarOnScreen,
+    sidebarVisible,
+    railOnScreen,
     spaces,
     tabUsage,
     settingsTab,
@@ -159,10 +176,172 @@ export function Sidebar(props: SidebarProps) {
     tabs,
     sidebarRef,
   } = props;
+  // The tab list collapses to its icon rail instead of disappearing; a full panel is always open.
+  const hasRail = sidebarMode === "tabs";
+  const collapsed = hasRail && !sidebarVisible;
+  // The shape morph (shared/sidebar-morph.ts): the rail and the panel are swapped, and every
+  // mark travels from where the old shape drew it to where the new one does.
+  const morphHostRef = useRef<HTMLDivElement | null>(null);
+  const morphSnapshotRef = useRef<MorphSnapshot | null>(null);
+  const morphShapeRef = useRef<"rail" | "panel" | null>(null);
+  const morphTimerRef = useRef<number | undefined>(undefined);
+  useLayoutEffect(() => {
+    const host = morphHostRef.current;
+    const card = host?.parentElement ?? null;
+    if (!host || !card || !hasRail) {
+      morphShapeRef.current = null;
+      morphSnapshotRef.current = null;
+      return;
+    }
+    const shape = collapsed ? "rail" : "panel";
+    if (shape === morphShapeRef.current) {
+      // At rest: keep the snapshot fresh, so the next change captures where things stand now.
+      // During a morph, its marks are still travelling; recapturing them here makes the next
+      // transition start from an arbitrary in-flight position.
+      if (!card.hasAttribute("data-reshaping"))
+        morphSnapshotRef.current = captureSidebarMorph(host);
+      return;
+    }
+    const previous = morphShapeRef.current;
+    morphShapeRef.current = shape;
+    const snapshot = morphSnapshotRef.current;
+    const settleContentCollapse = surface === "content" && shape === "rail";
+    if (
+      snapshot &&
+      previous &&
+      (document.visibilityState === "hidden" || settleContentCollapse)
+    ) {
+      // This surface is not drawing (its view is hidden: the content renderer behind a live page,
+      // the overlay over New Tab). A morph played now would only start on its next frame, so the
+      // change would replay in full when the surface is next shown. The content surface also sits
+      // over the page: do not paint an outgoing full-width panel ghost while its rail is collapsed.
+      // Its card still follows the CSS width transition; only the row-mark morph is settled here.
+      window.clearTimeout(morphTimerRef.current);
+      morphTimerRef.current = undefined;
+      settleSidebarMorph(host);
+      card.removeAttribute("data-reshaping");
+    } else if (snapshot && previous) {
+      // While the card grows or shrinks the incoming column holds its final width, so the marks'
+      // measured destinations stay true and only the space beside them moves (Browser.css keys
+      // the hold on the card's direction, not on the shape name).
+      card.dataset.reshaping = shape === "rail" ? "collapse" : "expand";
+      const total = playSidebarMorph(snapshot, host);
+      window.clearTimeout(morphTimerRef.current);
+      morphTimerRef.current = window.setTimeout(
+        () => {
+          morphTimerRef.current = undefined;
+          card.removeAttribute("data-reshaping");
+          // The marks have landed: take a clean at-rest snapshot.
+          if (card.isConnected && morphShapeRef.current === shape)
+            morphSnapshotRef.current = captureSidebarMorph(host);
+        },
+        Math.max(MORPH_RESHAPE_MS, total),
+      );
+    }
+    // The new shape is what the next change captures.
+    morphSnapshotRef.current = captureSidebarMorph(host);
+  });
+  // While this surface is not drawing, nothing in its sidebar may transition or keep a morph
+  // waiting: Chromium starts both on the next frame, so a change made out of sight (the panel
+  // closing behind a live page, a tab created over New Tab) would play out over the page the
+  // moment the surface is shown. Browser.css drops transitions under [data-offscreen]; a morph
+  // that was running when the surface went out of sight lands at once.
+  useLayoutEffect(() => {
+    const card = sidebarRef.current;
+    const host = morphHostRef.current;
+    if (!card) return;
+    const sync = (): void => {
+      if (document.visibilityState === "hidden") {
+        window.clearTimeout(morphTimerRef.current);
+        morphTimerRef.current = undefined;
+        settleSidebarMorph(host);
+        card.removeAttribute("data-reshaping");
+        card.setAttribute("data-offscreen", "");
+        return;
+      }
+      if (!card.hasAttribute("data-offscreen")) return;
+      // Resolve the styles the hidden document skipped (the shape it changed to) with
+      // transitions still off, so showing the surface starts none.
+      void card.getBoundingClientRect();
+      card.removeAttribute("data-offscreen");
+      if (morphShapeRef.current)
+        morphSnapshotRef.current = captureSidebarMorph(host);
+    };
+    sync();
+    document.addEventListener("visibilitychange", sync);
+    return () => document.removeEventListener("visibilitychange", sync);
+  }, [sidebarRef]);
+  // Scrolling and window resizes move marks without a render: keep the snapshot honest, but never
+  // mid-morph, when the marks are still travelling.
+  useLayoutEffect(() => {
+    const host = morphHostRef.current;
+    const card = host?.parentElement ?? null;
+    if (!host || !card) return;
+    let queued = false;
+    const refresh = () => {
+      queued = false;
+      if (card.hasAttribute("data-reshaping") || !morphShapeRef.current) return;
+      if (morphSnapshotRef.current?.column?.isConnected)
+        morphSnapshotRef.current = captureSidebarMorph(host);
+    };
+    const queue = () => {
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(refresh);
+    };
+    const refreshAlignedRail = () => {
+      if (
+        card.hasAttribute("data-reshaping") ||
+        morphShapeRef.current !== "rail"
+      )
+        return;
+      morphSnapshotRef.current = captureSidebarMorph(host);
+    };
+    host.addEventListener("scroll", queue, { capture: true, passive: true });
+    host.addEventListener("sidebar-rail-aligned", refreshAlignedRail);
+    window.addEventListener("resize", queue, { passive: true });
+    return () => {
+      host.removeEventListener("scroll", queue, true);
+      host.removeEventListener("sidebar-rail-aligned", refreshAlignedRail);
+      window.removeEventListener("resize", queue);
+      window.clearTimeout(morphTimerRef.current);
+    };
+  }, []);
+  const railTabs = useMemo(() => {
+    const ordered: BrowserTabSummary[] = [];
+    for (const id of tabDrag.orderedIds) {
+      const entry = tabEntriesByKey.get(id);
+      if (!entry) continue;
+      if (entry.kind === "split") ordered.push(...entry.tabs);
+      else if (entry.kind === "tab") ordered.push(entry.tab);
+    }
+    return ordered;
+  }, [tabDrag.orderedIds, tabEntriesByKey]);
+  const railPinnedTabs = useMemo(
+    () =>
+      pinnedTabDrag.orderedIds
+        .map((id: string) => pinnedTabsById.get(id))
+        .filter(
+          (tab: BrowserTabSummary | undefined): tab is BrowserTabSummary =>
+            Boolean(tab),
+        ),
+    [pinnedTabDrag.orderedIds, pinnedTabsById],
+  );
+  const railPinnedSites = useMemo(
+    () =>
+      pinnedSiteDrag.orderedIds
+        .map((url: string) =>
+          pinnedSites.find((site: PinnedSite) => site.url === url),
+        )
+        .filter((site: PinnedSite | undefined): site is PinnedSite =>
+          Boolean(site),
+        ),
+    [pinnedSiteDrag.orderedIds, pinnedSites],
+  );
   return (
     <aside
       ref={sidebarRef}
-      className={`browser-sidebar${activeSpace ? " has-spaces" : ""}${sidebarBackdropClass(surface, sidebarBackdrop)}${browser.private ? " is-private-window" : ""}`}
+      className={`browser-sidebar${activeSpace ? " has-spaces" : ""}${hasRail ? " has-rail" : ""}${collapsed ? " is-collapsed" : ""}${sidebarBackdropClass(surface, sidebarBackdrop)}${browser.private ? " is-private-window" : ""}`}
       style={
         activeSpace
           ? ({
@@ -183,466 +362,504 @@ export function Sidebar(props: SidebarProps) {
       {surface === "sidebar" && (
         <SidebarBackdropLayer state={sidebarBackdrop} cardRef={sidebarRef} />
       )}
-      {window.api.platform === "darwin" && (
-        <div className="sidebar-window-controls" aria-label="Window controls">
-          <button
-            className="sidebar-window-control is-close"
-            type="button"
-            aria-label="Close window"
-            title="Close window"
-            onClick={() => void window.api.browser.windowControl("close")}
-          />
-          <button
-            className="sidebar-window-control is-minimize"
-            type="button"
-            aria-label="Minimize window"
-            title="Minimize window"
-            onClick={() => void window.api.browser.windowControl("minimize")}
-          />
-          <button
-            className="sidebar-window-control is-zoom"
-            type="button"
-            aria-label="Toggle window zoom"
-            title="Toggle window zoom"
-            onClick={() => void window.api.browser.windowControl("toggle-zoom")}
-          />
-        </div>
-      )}
-      {sidebarMode !== "tabs" && !isSettingsSection(sidebarMode) && (
-        <div className="sidebar-heading">
-          <strong>
-            {sidebarMode === "history"
-              ? "History"
-              : sidebarMode === "downloads"
-                ? "Downloads"
-                : sidebarMode === "bookmarks"
-                  ? "Bookmarks"
-                  : sidebarMode === "network"
-                    ? "Network"
-                    : "This site"}
-          </strong>
-          {sidebarMode === "history" && (
-            <button
-              className="sidebar-icon-button"
-              type="button"
-              aria-label="Clear browsing history"
-              title="Clear history"
-              disabled={history.length === 0}
-              onClick={() => void clearHistory()}
-            >
-              <span aria-hidden="true">⌫</span>
-            </button>
-          )}
-        </div>
-      )}
-
-      {sidebarMode === "tabs" && (
-        <section
-          className="sidebar-pinned-sites"
-          aria-label="Pinned tabs and bookmarks"
-        >
-          {/* Cmd+drag (Ctrl+drag off macOS) reorders pins; a plain drag does nothing. */}
-          <div
-            ref={pinnedListRef}
-            className={`sidebar-pinned-list${pinReorder.armed ? " is-reorder-armed" : ""}${pinnedTabDrag.draggingId || pinnedSiteDrag.draggingId ? " is-reordering" : ""}`}
-            onPointerEnter={pinReorder.track}
-            onPointerMove={pinReorder.track}
-            onPointerDown={pinReorder.track}
-            onPointerLeave={() => {
-              if (!pinnedTabDrag.draggingId && !pinnedSiteDrag.draggingId)
-                pinReorder.disarm();
-            }}
-          >
-            {pinnedTabDrag.orderedIds
-              .map((id: string) => pinnedTabsById.get(id))
-              .filter(
-                (
-                  tab: BrowserTabSummary | undefined,
-                ): tab is BrowserTabSummary => Boolean(tab),
-              )
-              .map((tab: BrowserTabSummary) => (
-                <PinnedTabIcon
-                  key={`tab:${tab.id}`}
-                  tab={tab}
-                  dragProps={{
-                    ...pinnedTabDrag.itemProps,
-                    "data-pin-kind": "tab",
-                    "data-pin-id": tab.id,
-                    onPointerDown: (event) =>
-                      pinnedTabDrag.onPointerDown(event, tab.id),
-                  }}
-                />
-              ))}
-            {pinnedSiteDrag.orderedIds
-              .map((url: string) =>
-                pinnedSites.find((site: PinnedSite) => site.url === url),
-              )
-              .filter((site: PinnedSite | undefined): site is PinnedSite =>
-                Boolean(site),
-              )
-              .map((site: PinnedSite) => (
-                <PinnedSiteIcon
-                  key={`bookmark:${site.url}`}
-                  site={site}
-                  cachedFaviconUrl={cachedSiteIcons[httpOrigin(site.url) ?? ""]}
-                  onOpen={() => void openPinnedSite(site)}
-                  onUnpin={() =>
-                    void savePinnedSites(
-                      pinnedSites.filter(
-                        (pinned: PinnedSite) => pinned.url !== site.url,
-                      ),
-                    )
-                  }
-                  dragProps={{
-                    ...pinnedSiteDrag.itemProps,
-                    "data-pin-kind": "site",
-                    "data-pin-id": site.url,
-                    onPointerDown: (event) =>
-                      pinnedSiteDrag.onPointerDown(event, site.url),
-                  }}
-                />
-              ))}
-          </div>
-        </section>
-      )}
-
-      {sidebarMode === "history" ? (
-        <div className="history-sidebar">
-          <label className="history-search">
-            <span aria-hidden="true">⌕</span>
-            <input
-              type="search"
-              value={historyQuery}
-              onChange={(event) => setHistoryQuery(event.target.value)}
-              placeholder="Search history"
-              aria-label="Search browsing history"
-            />
-          </label>
-          <div className="history-list" aria-label="Recent browsing history">
-            {filteredHistory
-              .slice(0, historyQuery ? 400 : 250)
-              .map((entry: BrowsingHistoryEntry) => (
-                <button
-                  className="history-item"
-                  key={entry.id}
-                  type="button"
-                  onClick={() => void openHistoryEntry(entry)}
-                  title={entry.url}
-                >
-                  <strong>{entry.title}</strong>
-                  <span className="history-host">{historyHost(entry.url)}</span>
-                  <time dateTime={new Date(entry.visitedAt).toISOString()}>
-                    {formatVisitedAt(entry.visitedAt)}
-                  </time>
-                </button>
-              ))}
-            {filteredHistory.length === 0 && (
-              <p className="sidebar-empty">
-                {historyQuery
-                  ? "No matching history"
-                  : "No browsing history yet"}
-              </p>
-            )}
-          </div>
-        </div>
-      ) : (
+      <div
+        ref={morphHostRef}
+        className={`sidebar-body${hasRail ? " has-rail" : ""}`}
+      >
+        {/* Both shapes stay mounted; the inactive one goes out of flow and invisible
+          (is-shape-hidden) so the framework and automation keep reading its DOM, and the tab
+          list holds its scroll position through the collapse (shared/sidebar-morph.ts). */}
         <div
-          ref={tabDrag.listRef}
-          className={`tab-list${tabDrag.draggingId ? " is-drag-sorting" : ""}`}
-          role="tablist"
-          aria-label="Open tabs"
-          onClickCapture={tabDrag.onClickCapture}
+          className={`sidebar-panel ${MORPH_COLUMN_CLASS}${collapsed ? ` ${MORPH_HIDDEN_CLASS}` : ""}`}
         >
-          {tabSelection.count >= 2 && (
-            <div
-              className="tab-selection-bar"
-              role="toolbar"
-              aria-label="Selected tabs"
-            >
-              <span className="tab-selection-count">
-                {tabSelection.count} tabs selected
-              </span>
-              <button
-                type="button"
-                title={`Group the selected tabs (${window.api.platform === "darwin" ? "⌘G" : "Ctrl+G"})`}
-                onClick={tabSelection.group}
-              >
-                Group
-              </button>
-              <button
-                className="tab-selection-clear"
-                type="button"
-                aria-label="Clear selection"
-                title="Clear selection (Esc)"
-                onClick={tabSelection.clear}
-              >
-                ×
-              </button>
+          {sidebarMode !== "tabs" && !isSettingsSection(sidebarMode) && (
+            <div className="sidebar-heading">
+              <strong>
+                {sidebarMode === "history"
+                  ? "History"
+                  : sidebarMode === "downloads"
+                    ? "Downloads"
+                    : sidebarMode === "bookmarks"
+                      ? "Bookmarks"
+                      : sidebarMode === "network"
+                        ? "Network"
+                        : "This site"}
+              </strong>
+              {sidebarMode === "history" && (
+                <button
+                  className="sidebar-icon-button"
+                  type="button"
+                  aria-label="Clear browsing history"
+                  title="Clear history"
+                  disabled={history.length === 0}
+                  onClick={() => void clearHistory()}
+                >
+                  <span aria-hidden="true">⌫</span>
+                </button>
+              )}
             </div>
           )}
-          {tabDrag.orderedIds
-            .map((id: string) => tabEntriesByKey.get(id))
-            .filter((entry) => entry !== undefined)
-            .map((entry) =>
-              entry.kind === "group" ? (
-                <TabGroupHeader
-                  key={entry.key}
-                  entryKey={entry.key}
-                  group={entry.group}
-                  dragging={tabDrag.draggingId === entry.key}
-                  handlers={tabDrag.itemHandlers(entry.key)}
-                />
-              ) : entry.kind === "split" ? (
-                <SplitTabEntry
-                  groupColor={
-                    entry.tabs[0]?.group
-                      ? TAB_GROUP_COLOR_VALUES[
-                          entry.tabs[0].group
-                            .color as keyof typeof TAB_GROUP_COLOR_VALUES
-                        ]
-                      : undefined
-                  }
-                  key={entry.key}
-                  entryId={entry.key}
-                  tabs={entry.tabs}
-                  dragging={tabDrag.draggingId === entry.key}
-                  animate={sidebarOnScreen}
-                  handlers={tabDrag.itemHandlers(entry.key)}
-                  selected={tabSelection.selectedKeys.has(entry.key)}
-                  onSelectClick={(event) =>
-                    tabSelection.handleClick(event, entry.key)
-                  }
-                  onMoveBy={(offset) => tabDrag.moveBy(entry.key, offset)}
-                  titleFor={(tab) =>
-                    withTabUsageHint(
-                      tab.sleeping
-                        ? `${tab.title} — ${describeTabSleep(tab.sleep).toLowerCase()}; select to reload`
-                        : tab.title,
-                      tabUsage[tab.id],
-                    )
-                  }
-                  onActivate={(id) => {
-                    void window.api.browser.tabs.activate(id);
-                    if (
-                      sidebarMode === "downloads" ||
-                      sidebarMode === "bookmarks"
-                    )
-                      exitPanel();
-                  }}
-                />
-              ) : (
-                (({ tab }) => (
-                  <div
-                    className={`tab-item${tab.active ? " is-active" : ""}${tab.private ? " is-private" : ""}${tab.sleeping ? " is-sleeping" : ""}${tabDrag.draggingId === tab.id ? " is-dragging" : ""}${tab.group ? " is-grouped" : ""}${tab.group && revealingGroups.has(tab.group.id) ? " is-group-revealing" : ""}${tabSelection.selectedKeys.has(tab.id) ? " is-multi-selected" : ""}`}
-                    style={
-                      tab.group
-                        ? ({
-                            "--group-color":
-                              TAB_GROUP_COLOR_VALUES[
-                                tab.group
-                                  .color as keyof typeof TAB_GROUP_COLOR_VALUES
-                              ],
-                          } as React.CSSProperties)
-                        : undefined
-                    }
-                    key={tab.id}
-                    data-browser-tab-id={tab.id}
-                    role="tab"
-                    aria-selected={tab.active}
-                    aria-grabbed={
-                      tabDrag.draggingId === tab.id ? true : undefined
-                    }
-                    tabIndex={0}
-                    title={withTabUsageHint(
-                      tab.sleeping
-                        ? `${tab.title} — ${describeTabSleep(tab.sleep).toLowerCase()}; select to reload`
-                        : tab.title,
-                      tabUsage[tab.id],
-                    )}
-                    onMouseEnter={
-                      tab.sleeping
-                        ? () => sleepingTabHoverRef.current?.push(tab.id)
-                        : undefined
-                    }
-                    onMouseLeave={
-                      tab.sleeping
-                        ? () => sleepingTabHoverRef.current?.cancel()
-                        : undefined
-                    }
-                    onClick={(event) => {
-                      if (tabSelection.handleClick(event, tab.id)) return;
-                      void window.api.browser.tabs.activate(tab.id);
-                      if (
-                        sidebarMode === "downloads" ||
-                        sidebarMode === "bookmarks"
-                      )
-                        exitPanel();
-                    }}
-                    // Middle-click closes the tab; swallow the press so Chromium doesn't start autoscroll.
-                    onMouseDown={(event) => {
-                      if (event.button === 1) event.preventDefault();
-                    }}
-                    onAuxClick={(event) => {
-                      if (event.button !== 1) return;
-                      event.preventDefault();
-                      event.stopPropagation();
-                      void window.api.browser.tabs.close(tab.id);
-                    }}
-                    onKeyDown={(event) => {
-                      if (
-                        event.altKey &&
-                        event.shiftKey &&
-                        (event.key === "ArrowUp" || event.key === "ArrowDown")
-                      ) {
-                        event.preventDefault();
-                        tabDrag.moveBy(
-                          tab.id,
-                          event.key === "ArrowUp" ? -1 : 1,
-                        );
-                        return;
-                      }
-                      selectTabOnKeyboard(event, tab.id);
-                    }}
-                    {...tabDrag.itemHandlers(tab.id)}
-                  >
-                    <TabFavicon tab={tab} animate={sidebarOnScreen} />
-                    <span className="tab-title">{tab.title}</span>
-                    {tab.private && (
-                      <span
-                        className="tab-private-badge"
-                        title="Private tab"
-                        aria-label="Private tab"
-                      >
-                        <PrivateGlyph />
-                      </span>
-                    )}
-                    {tab.crashed && (
-                      <span
-                        className="tab-crashed-badge"
-                        title="This tab crashed · it reloads when you open it"
-                        aria-label="Crashed tab"
-                      >
-                        <svg
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          aria-hidden="true"
-                        >
-                          <path d="M12 3 2.5 20h19L12 3Z" />
-                          <path d="M12 10v4" />
-                          <path d="M12 17h.01" />
-                        </svg>
-                      </span>
-                    )}
-                    <TabAudioButton tab={tab} />
-                    {castTabId === tab.id && <TabCastBadge />}
-                    {tab.sleeping && (
-                      <span
-                        className={`tab-sleep-indicator${isRestoredSleep(tab.sleep) ? " is-restored" : ""}`}
-                        title={describeTabSleep(tab.sleep)}
-                        aria-label={`Sleeping tab: ${describeTabSleep(tab.sleep)}`}
-                      >
-                        ☾
-                      </span>
-                    )}
-                    <button
-                      className="tab-close"
-                      type="button"
-                      aria-label={`Close ${tab.title}`}
-                      title="Close tab"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        void window.api.browser.tabs.close(tab.id);
-                      }}
-                    >
-                      ×
-                    </button>
-                  </div>
-                ))(entry)
-              ),
-            )}
-          {tabs.length === 0 && <p className="sidebar-empty">No open tabs</p>}
-          <div className="sidebar-new-tab-actions">
-            <button
-              className="sidebar-new-tab-row"
-              type="button"
-              aria-label="New tab"
-              title="New tab (Ctrl/⌘+T)"
-              onClick={createNewTab}
+
+          {sidebarMode === "tabs" && (
+            <section
+              className="sidebar-pinned-sites"
+              aria-label="Pinned tabs and bookmarks"
             >
-              <span className="sidebar-new-tab-row-icon" aria-hidden="true">
-                ＋
-              </span>
-              <span className="sidebar-new-tab-row-label">New Tab</span>
+              {/* Cmd+drag (Ctrl+drag off macOS) reorders pins; a plain drag does nothing. */}
+              <div
+                ref={pinnedListRef}
+                className={`sidebar-pinned-list${pinReorder.armed ? " is-reorder-armed" : ""}${pinnedTabDrag.draggingId || pinnedSiteDrag.draggingId ? " is-reordering" : ""}`}
+                data-glide-scroller
+                onPointerEnter={pinReorder.track}
+                onPointerMove={pinReorder.track}
+                onPointerDown={pinReorder.track}
+                onPointerLeave={() => {
+                  if (!pinnedTabDrag.draggingId && !pinnedSiteDrag.draggingId)
+                    pinReorder.disarm();
+                }}
+              >
+                {pinnedTabDrag.orderedIds
+                  .map((id: string) => pinnedTabsById.get(id))
+                  .filter(
+                    (
+                      tab: BrowserTabSummary | undefined,
+                    ): tab is BrowserTabSummary => Boolean(tab),
+                  )
+                  .map((tab: BrowserTabSummary) => (
+                    <PinnedTabIcon
+                      key={`tab:${tab.id}`}
+                      tab={tab}
+                      dragProps={{
+                        ...pinnedTabDrag.itemProps,
+                        "data-pin-kind": "tab",
+                        "data-pin-id": tab.id,
+                        "data-motion-key": `pin:${tab.id}`,
+                        onPointerDown: (event) =>
+                          pinnedTabDrag.onPointerDown(event, tab.id),
+                      }}
+                    />
+                  ))}
+                {pinnedSiteDrag.orderedIds
+                  .map((url: string) =>
+                    pinnedSites.find((site: PinnedSite) => site.url === url),
+                  )
+                  .filter((site: PinnedSite | undefined): site is PinnedSite =>
+                    Boolean(site),
+                  )
+                  .map((site: PinnedSite) => (
+                    <PinnedSiteIcon
+                      key={`bookmark:${site.url}`}
+                      site={site}
+                      cachedFaviconUrl={
+                        cachedSiteIcons[httpOrigin(site.url) ?? ""]
+                      }
+                      onOpen={() => void openPinnedSite(site)}
+                      onUnpin={() =>
+                        void savePinnedSites(
+                          pinnedSites.filter(
+                            (pinned: PinnedSite) => pinned.url !== site.url,
+                          ),
+                        )
+                      }
+                      dragProps={{
+                        ...pinnedSiteDrag.itemProps,
+                        "data-pin-kind": "site",
+                        "data-pin-id": site.url,
+                        "data-motion-key": `site:${site.url}`,
+                        onPointerDown: (event) =>
+                          pinnedSiteDrag.onPointerDown(event, site.url),
+                      }}
+                    />
+                  ))}
+              </div>
+              {/* Its own part so the shape morph crossfades it with the rail's (Browser.css). Drawn
+               * exactly when the rail draws its own: whenever anything is pinned. */}
+              {(railPinnedTabs.length > 0 || railPinnedSites.length > 0) && (
+                <div className="sidebar-pinned-divider" aria-hidden="true" />
+              )}
+            </section>
+          )}
+
+          {sidebarMode === "history" ? (
+            <div className="history-sidebar">
+              <label className="history-search">
+                <span aria-hidden="true">⌕</span>
+                <input
+                  type="search"
+                  value={historyQuery}
+                  onChange={(event) => setHistoryQuery(event.target.value)}
+                  placeholder="Search history"
+                  aria-label="Search browsing history"
+                />
+              </label>
+              <div
+                className="history-list"
+                aria-label="Recent browsing history"
+              >
+                {filteredHistory
+                  .slice(0, historyQuery ? 400 : 250)
+                  .map((entry: BrowsingHistoryEntry) => (
+                    <button
+                      className="history-item"
+                      key={entry.id}
+                      type="button"
+                      onClick={() => void openHistoryEntry(entry)}
+                      title={entry.url}
+                    >
+                      <strong>{entry.title}</strong>
+                      <span className="history-host">
+                        {historyHost(entry.url)}
+                      </span>
+                      <time dateTime={new Date(entry.visitedAt).toISOString()}>
+                        {formatVisitedAt(entry.visitedAt)}
+                      </time>
+                    </button>
+                  ))}
+                {filteredHistory.length === 0 && (
+                  <p className="sidebar-empty">
+                    {historyQuery
+                      ? "No matching history"
+                      : "No browsing history yet"}
+                  </p>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div
+              ref={tabDrag.listRef}
+              className={`tab-list${tabDrag.draggingId ? " is-drag-sorting" : ""}`}
+              data-glide-scroller
+              role="tablist"
+              aria-label="Open tabs"
+              onClickCapture={tabDrag.onClickCapture}
+            >
+              {tabSelection.count >= 2 && (
+                <div
+                  className="tab-selection-bar"
+                  role="toolbar"
+                  aria-label="Selected tabs"
+                >
+                  <span className="tab-selection-count">
+                    {tabSelection.count} tabs selected
+                  </span>
+                  <button
+                    type="button"
+                    title={`Group the selected tabs (${window.api.platform === "darwin" ? "⌘G" : "Ctrl+G"})`}
+                    onClick={tabSelection.group}
+                  >
+                    Group
+                  </button>
+                  <button
+                    className="tab-selection-clear"
+                    type="button"
+                    aria-label="Clear selection"
+                    title="Clear selection (Esc)"
+                    onClick={tabSelection.clear}
+                  >
+                    ×
+                  </button>
+                </div>
+              )}
+              {tabDrag.orderedIds
+                .map((id: string) => tabEntriesByKey.get(id))
+                .filter((entry) => entry !== undefined)
+                .map((entry) =>
+                  entry.kind === "group" ? (
+                    <TabGroupHeader
+                      key={entry.key}
+                      entryKey={entry.key}
+                      group={entry.group}
+                      dragging={tabDrag.draggingId === entry.key}
+                      handlers={tabDrag.itemHandlers(entry.key)}
+                    />
+                  ) : entry.kind === "split" ? (
+                    <SplitTabEntry
+                      groupColor={
+                        entry.tabs[0]?.group
+                          ? TAB_GROUP_COLOR_VALUES[
+                              entry.tabs[0].group
+                                .color as keyof typeof TAB_GROUP_COLOR_VALUES
+                            ]
+                          : undefined
+                      }
+                      key={entry.key}
+                      entryId={entry.key}
+                      dataMotionKey={`tab:${entry.tabs[0]!.id}`}
+                      tabs={entry.tabs}
+                      dragging={tabDrag.draggingId === entry.key}
+                      animate={sidebarOnScreen}
+                      handlers={tabDrag.itemHandlers(entry.key)}
+                      selected={tabSelection.selectedKeys.has(entry.key)}
+                      onSelectClick={(event) =>
+                        tabSelection.handleClick(event, entry.key)
+                      }
+                      onMoveBy={(offset) => tabDrag.moveBy(entry.key, offset)}
+                      titleFor={(tab) =>
+                        withTabUsageHint(
+                          tab.sleeping
+                            ? `${tab.title} — ${describeTabSleep(tab.sleep).toLowerCase()}; select to reload`
+                            : tab.title,
+                          tabUsage[tab.id],
+                        )
+                      }
+                      onActivate={(id) => {
+                        void window.api.browser.tabs.activate(id);
+                        if (
+                          sidebarMode === "downloads" ||
+                          sidebarMode === "bookmarks"
+                        )
+                          exitPanel();
+                      }}
+                    />
+                  ) : (
+                    (({ tab }) => (
+                      <div
+                        className={`tab-item${tab.active ? " is-active" : ""}${tab.private ? " is-private" : ""}${tab.sleeping ? " is-sleeping" : ""}${tabDrag.draggingId === tab.id ? " is-dragging" : ""}${tab.group ? " is-grouped" : ""}${tab.group && revealingGroups.has(tab.group.id) ? " is-group-revealing" : ""}${tabSelection.selectedKeys.has(tab.id) ? " is-multi-selected" : ""}`}
+                        style={
+                          tab.group
+                            ? ({
+                                "--group-color":
+                                  TAB_GROUP_COLOR_VALUES[
+                                    tab.group
+                                      .color as keyof typeof TAB_GROUP_COLOR_VALUES
+                                  ],
+                              } as React.CSSProperties)
+                            : undefined
+                        }
+                        key={tab.id}
+                        data-browser-tab-id={tab.id}
+                        data-motion-key={`tab:${tab.id}`}
+                        role="tab"
+                        aria-selected={tab.active}
+                        aria-grabbed={
+                          tabDrag.draggingId === tab.id ? true : undefined
+                        }
+                        tabIndex={0}
+                        title={withTabUsageHint(
+                          tab.sleeping
+                            ? `${tab.title} — ${describeTabSleep(tab.sleep).toLowerCase()}; select to reload`
+                            : tab.title,
+                          tabUsage[tab.id],
+                        )}
+                        onMouseEnter={
+                          tab.sleeping
+                            ? () => sleepingTabHoverRef.current?.push(tab.id)
+                            : undefined
+                        }
+                        onMouseLeave={
+                          tab.sleeping
+                            ? () => sleepingTabHoverRef.current?.cancel()
+                            : undefined
+                        }
+                        onClick={(event) => {
+                          if (tabSelection.handleClick(event, tab.id)) return;
+                          void window.api.browser.tabs.activate(tab.id);
+                          if (
+                            sidebarMode === "downloads" ||
+                            sidebarMode === "bookmarks"
+                          )
+                            exitPanel();
+                        }}
+                        // Middle-click closes the tab; swallow the press so Chromium doesn't start autoscroll.
+                        onMouseDown={(event) => {
+                          if (event.button === 1) event.preventDefault();
+                        }}
+                        onAuxClick={(event) => {
+                          if (event.button !== 1) return;
+                          event.preventDefault();
+                          event.stopPropagation();
+                          void window.api.browser.tabs.close(tab.id);
+                        }}
+                        onKeyDown={(event) => {
+                          if (
+                            event.altKey &&
+                            event.shiftKey &&
+                            (event.key === "ArrowUp" ||
+                              event.key === "ArrowDown")
+                          ) {
+                            event.preventDefault();
+                            tabDrag.moveBy(
+                              tab.id,
+                              event.key === "ArrowUp" ? -1 : 1,
+                            );
+                            return;
+                          }
+                          selectTabOnKeyboard(event, tab.id);
+                        }}
+                        {...tabDrag.itemHandlers(tab.id)}
+                      >
+                        <TabFavicon tab={tab} animate={sidebarOnScreen} />
+                        <span className="tab-title">{tab.title}</span>
+                        {tab.private && (
+                          <span
+                            className="tab-private-badge"
+                            title="Private tab"
+                            aria-label="Private tab"
+                          >
+                            <PrivateGlyph />
+                          </span>
+                        )}
+                        {tab.crashed && (
+                          <span
+                            className="tab-crashed-badge"
+                            title="This tab crashed · it reloads when you open it"
+                            aria-label="Crashed tab"
+                          >
+                            <svg
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              aria-hidden="true"
+                            >
+                              <path d="M12 3 2.5 20h19L12 3Z" />
+                              <path d="M12 10v4" />
+                              <path d="M12 17h.01" />
+                            </svg>
+                          </span>
+                        )}
+                        <TabAudioButton tab={tab} />
+                        {castTabId === tab.id && <TabCastBadge />}
+                        {tab.sleeping && (
+                          <span
+                            className={`tab-sleep-indicator${isRestoredSleep(tab.sleep) ? " is-restored" : ""}`}
+                            title={describeTabSleep(tab.sleep)}
+                            aria-label={`Sleeping tab: ${describeTabSleep(tab.sleep)}`}
+                          >
+                            ☾
+                          </span>
+                        )}
+                        <button
+                          className="tab-close"
+                          type="button"
+                          aria-label={`Close ${tab.title}`}
+                          title="Close tab"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void window.api.browser.tabs.close(tab.id);
+                          }}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))(entry)
+                  ),
+                )}
+              {tabs.length === 0 && (
+                <p className="sidebar-empty">No open tabs</p>
+              )}
+              <div className="sidebar-new-tab-actions">
+                <button
+                  className="sidebar-new-tab-row"
+                  type="button"
+                  data-motion-key="new-tab"
+                  aria-label="New tab"
+                  title="New tab (Ctrl/⌘+T)"
+                  onClick={createNewTab}
+                >
+                  <span className="sidebar-new-tab-row-icon" aria-hidden="true">
+                    ＋
+                  </span>
+                  <span className="sidebar-new-tab-row-label">New Tab</span>
+                </button>
+                <button
+                  className="sidebar-new-private-tab"
+                  type="button"
+                  aria-label="New private tab"
+                  title="New private tab (Ctrl/⌘+Alt+N)"
+                  onClick={() => void window.api.browser.tabs.createPrivate()}
+                >
+                  <PrivateGlyph />
+                </button>
+              </div>
+            </div>
+          )}
+          {sidebarMode === "tabs" && (
+            <ArchivedTabsSidebar
+              cachedIcons={cachedSiteIcons}
+              onOpened={() => setSidebarMode("tabs")}
+            />
+          )}
+
+          {sidebarMode === "tabs" && spaces?.enabled && (
+            <SpacesSwitcher snapshot={spaces} />
+          )}
+          <div className="sidebar-footer">
+            {sidebarMode === "tabs" && (
+              <button
+                className={`sidebar-footer-icon-button sidebar-pin-button${sidebarPinned ? " is-current" : ""}`}
+                type="button"
+                aria-label={
+                  sidebarPinned ? "Auto-hide sidebar" : "Keep sidebar open"
+                }
+                aria-pressed={sidebarPinned}
+                title={
+                  sidebarPinned ? "Auto-hide sidebar" : "Keep sidebar open"
+                }
+                data-morph="sidebar-pin"
+                onClick={() => setSidebarPinned((pinned: boolean) => !pinned)}
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <rect x="3.5" y="5" width="17" height="14" rx="3" />
+                  <path d="M9 5v14" />
+                  {sidebarPinned ? (
+                    <path d="m15.5 10-2 2 2 2" />
+                  ) : (
+                    <path d="m13.5 10 2 2-2 2" />
+                  )}
+                </svg>
+              </button>
+            )}
+            <UpdateBadge />
+            <button
+              className={`sidebar-footer-icon-button${settingsTab ? " is-current" : ""}`}
+              type="button"
+              aria-label="Settings"
+              aria-current={settingsTab ? "page" : undefined}
+              title={`Settings (${window.api.platform === "darwin" ? "⌘," : "Ctrl+,"})`}
+              onClick={openSettings}
+            >
+              <span aria-hidden="true">⚙</span>
             </button>
             <button
-              className="sidebar-new-private-tab"
+              className="sidebar-footer-icon-button sidebar-quit-button"
               type="button"
-              aria-label="New private tab"
-              title="New private tab (Ctrl/⌘+Alt+N)"
-              onClick={() => void window.api.browser.tabs.createPrivate()}
+              aria-label="Quit Surffish"
+              title="Quit Surffish"
+              onClick={() => void window.api.browser.quit()}
             >
-              <PrivateGlyph />
+              <span aria-hidden="true">⏻</span>
             </button>
           </div>
         </div>
-      )}
-      {sidebarMode === "tabs" && (
-        <ArchivedTabsSidebar
-          cachedIcons={cachedSiteIcons}
-          onOpened={() => setSidebarMode("tabs")}
-        />
-      )}
-
-      {sidebarMode === "tabs" && spaces?.enabled && (
-        <SpacesSwitcher snapshot={spaces} />
-      )}
-      <div className="sidebar-footer">
-        {sidebarMode === "tabs" && (
-          <button
-            className={`sidebar-footer-icon-button sidebar-pin-button${sidebarPinned ? " is-current" : ""}`}
-            type="button"
-            aria-label={
-              sidebarPinned ? "Auto-hide sidebar" : "Keep sidebar open"
+        {hasRail && (
+          <SidebarRail
+            shapeHidden={!collapsed}
+            animate={railOnScreen}
+            cachedSiteIcons={cachedSiteIcons}
+            onRevealPins={() =>
+              // Focus in the sidebar keeps the panel revealed; once it is the shape on screen, the
+              // panel's own pins row takes focus (that is where a pin is opened or rearranged).
+              requestAnimationFrame(() =>
+                requestAnimationFrame(() =>
+                  pinnedListRef.current
+                    ?.querySelector<HTMLElement>("button")
+                    ?.focus(),
+                ),
+              )
             }
-            aria-pressed={sidebarPinned}
-            title={sidebarPinned ? "Auto-hide sidebar" : "Keep sidebar open"}
-            onClick={() => setSidebarPinned((pinned: boolean) => !pinned)}
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <rect x="3.5" y="5" width="17" height="14" rx="3" />
-              <path d="M9 5v14" />
-              {sidebarPinned ? (
-                <path d="m15.5 10-2 2 2 2" />
-              ) : (
-                <path d="m13.5 10 2 2-2 2" />
-              )}
-            </svg>
-          </button>
+            onTogglePinned={() =>
+              setSidebarPinned((pinned: boolean) => !pinned)
+            }
+            onNewTab={createNewTab}
+            pinnedSites={railPinnedSites}
+            pinnedTabs={railPinnedTabs}
+            sidebarPinned={sidebarPinned}
+            tabs={railTabs}
+          />
         )}
-        <UpdateBadge />
-        <button
-          className={`sidebar-footer-icon-button${settingsTab ? " is-current" : ""}`}
-          type="button"
-          aria-label="Settings"
-          aria-current={settingsTab ? "page" : undefined}
-          title={`Settings (${window.api.platform === "darwin" ? "⌘," : "Ctrl+,"})`}
-          onClick={openSettings}
-        >
-          <span aria-hidden="true">⚙</span>
-        </button>
-        <button
-          className="sidebar-footer-icon-button sidebar-quit-button"
-          type="button"
-          aria-label="Quit Surffish"
-          title="Quit Surffish"
-          onClick={() => void window.api.browser.quit()}
-        >
-          <span aria-hidden="true">⏻</span>
-        </button>
       </div>
       <div
         className="sidebar-resize-handle"

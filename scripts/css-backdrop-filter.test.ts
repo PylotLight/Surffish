@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { transform } from "lightningcss";
+import { applyNativeFullscreenWindowButtons } from "../src/main/native-fullscreen-window-buttons";
 
 // The production renderer CSS is minified by lightningcss (electron.vite.config.ts, cssMinify).
 // Given `backdrop-filter: x; -webkit-backdrop-filter: x;` in one rule, lightningcss keeps only the
@@ -22,6 +23,10 @@ function cssFiles(directory: string): string[] {
 const files = cssFiles(rendererDirectory);
 const blurring = files.filter((file) =>
   /(^|[^-])backdrop-filter:\s*(?!none)/m.test(readFileSync(file, "utf8")),
+);
+const browserCss = readFileSync(
+  join(rendererDirectory, "src/views/Browser.css"),
+  "utf8",
 );
 
 describe("renderer CSS backdrop-filter survives minification", () => {
@@ -59,4 +64,52 @@ describe("renderer CSS backdrop-filter survives minification", () => {
       expect(code).not.toMatch(/-webkit-backdrop-filter:(?!none)[^;}]*blur/);
     });
   }
+});
+
+describe("native fullscreen browser chrome", () => {
+  test("hides the toolbar and sidebar without a hover or focus reveal path", () => {
+    const rule = browserCss.match(
+      /\.app-shell\[data-native-fullscreen="true"\]\s+\.browser-chrome,\s*\.app-shell\[data-native-fullscreen="true"\]\s+\.browser-sidebar\s*\{([^}]*)\}/,
+    );
+    expect(rule?.[1]).toMatch(/display:\s*none\s*;/);
+    expect(browserCss).not.toMatch(
+      /\.app-shell\[data-native-fullscreen="true"\]\s+\.browser-chrome:(?:hover|focus-within|focus-visible)/,
+    );
+  });
+
+  test("hides macOS native window controls only during app fullscreen", () => {
+    const visibility: boolean[] = [];
+    const setWindowButtonVisibility = (visible: boolean): void => {
+      visibility.push(visible);
+    };
+
+    applyNativeFullscreenWindowButtons(
+      "darwin",
+      true,
+      setWindowButtonVisibility,
+    );
+    applyNativeFullscreenWindowButtons(
+      "darwin",
+      false,
+      setWindowButtonVisibility,
+    );
+    applyNativeFullscreenWindowButtons(
+      "linux",
+      true,
+      setWindowButtonVisibility,
+    );
+
+    expect(visibility).toEqual([false, true]);
+  });
+
+  test("hides Surffish chrome throughout page and video fullscreen", () => {
+    const rule = browserCss.match(
+      /\.app-shell\[data-page-fullscreen="true"\]\s+\.browser-chrome,\s*\.app-shell\[data-page-fullscreen="true"\]\s+\.browser-sidebar\s*\{([^}]*)\}/,
+    );
+    expect(rule?.[1]).toMatch(/display:\s*none\s*;/);
+    expect(browserCss).not.toContain("translateY(calc(-100% + 5px))");
+    expect(browserCss).not.toMatch(
+      /\.app-shell\[data-page-fullscreen="true"\]\s+\.browser-chrome:(?:hover|focus-within|focus-visible)/,
+    );
+  });
 });

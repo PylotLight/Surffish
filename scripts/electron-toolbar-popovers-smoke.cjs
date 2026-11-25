@@ -528,6 +528,7 @@ async function run() {
         (await toolbar.webContents.capturePage()).toPNG(),
       );
     toolbar.webContents.sendInputEvent({ type: "keyDown", keyCode: "Escape" });
+    toolbar.webContents.sendInputEvent({ type: "keyUp", keyCode: "Escape" });
     egg.closesOnEscape = await waitFor(
       async () => !(await eggOpen()),
       "the egg to close on Escape",

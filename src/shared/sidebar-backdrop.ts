@@ -1,3 +1,7 @@
+import {
+  normalizeSidebarPushStyle,
+  type SidebarPushStyle,
+} from "./page-view-bounds";
 /**
  * How the hover/pinned overlay sidebar gets a legible background over a live page.
  *
@@ -5,15 +9,18 @@
  * WebContentsView, so CSS backdrop-filter inside it only ever sees its own (empty) layer, and
  * window vibrancy (NSVisualEffectView) sits *behind* the page view, so it can't reach either.
  * The three paths that do work:
- *  - 'native':   View.setBackgroundBlur (Electron 44): the compositor blurs whatever is under the
- *                sidebar view, live, with no renderer raster work. Paired with a translucent tint
- *                that is still readable on its own in case a platform's compositor can't sample
- *                the page beneath.
- *  - 'snapshot': capture the page strip under the sidebar once when it opens (and again on tab
- *                switch / navigation, throttled), shrink it, blur it once in a canvas, darken it.
+ *  - 'native':   View.setBackgroundBlur (Electron 44): a live blur in the Chromium Views compositor.
+ *                This remains available for explicit tests, but macOS WebContentsView page pixels
+ *                use native Cocoa surfaces that are not reliably behind this compositor layer.
+ *  - 'snapshot': capture the page strip under the sidebar when it opens (and again on tab switch /
+ *                navigation, throttled), shrink it, blur it once in a canvas, darken it. macOS uses
+ *                this path by default so the blur is painted in the sidebar's own WebContentsView.
  *  - 'solid':    a near-opaque tint. Always used when "Sidebar blur" is off.
  */
-import { SIDEBAR_CARD } from "./sidebar-card";
+import {
+  FRAME_TRANSPARENCY_DEFAULT,
+  normalizeFrameTransparency,
+} from "./sidebar-card";
 
 export type SidebarBackdropMode = "native" | "snapshot" | "solid";
 
@@ -23,13 +30,75 @@ export const SIDEBAR_BACKDROP_MODES: readonly SidebarBackdropMode[] = [
   "solid",
 ];
 
+/**
+→ Settings → General → Appearance → Sidebar layout: how the hover/pinned sidebar sits over a live
+→ page. →'resize'/'slide' push the page card aside (Sidebar animation says how); →'float' floats the
+→ panel over the page as its own card (the page does not shift). Collapsed from the earlier
+→'Sidebar pushes page' toggle + →'Sidebar animation' select into one control.
+*/
+export const SIDEBAR_PAGE_MODES = ["resize", "slide", "float"] as const;
+export type SidebarPageMode = (typeof SIDEBAR_PAGE_MODES)[number];
+export const DEFAULT_SIDEBAR_PAGE_MODE: SidebarPageMode = "resize";
+
+export function normalizeSidebarPageMode(value: unknown): SidebarPageMode {
+  return (SIDEBAR_PAGE_MODES as readonly unknown[]).includes(value)
+    ? (value as SidebarPageMode)
+    : DEFAULT_SIDEBAR_PAGE_MODE;
+}
+
+/** Whether the hover panel pushes the page aside (vs. floats over it). Derived from the mode. */
+export function sidebarPushesPageForMode(mode: SidebarPageMode): boolean {
+  return mode !== "float";
+}
+
+/** How a pushed page card moves (only used while pushing). Derived from the mode. */
+export function sidebarPushStyleForMode(
+  mode: SidebarPageMode,
+): SidebarPushStyle {
+  return mode === "slide" ? "slide" : "resize";
+}
+
+/** Legacy JSON (pre-combination): derive the mode from the old toggle + animation select. */
+function modeFromLegacy(
+  sidebarPushesPage: unknown,
+  sidebarPushStyle: unknown,
+): SidebarPageMode {
+  // An absent toggle means the old default (pushing on); only an explicit false floats.
+  const pushes =
+    sidebarPushesPage === undefined ||
+    (typeof sidebarPushesPage === "boolean" && sidebarPushesPage);
+  return pushes ? normalizeSidebarPushStyle(sidebarPushStyle) : "float";
+}
+
 export interface SidebarBackdropSettings {
   /** Settings → General → Appearance → Sidebar blur. On by default. */
   blur: boolean;
+  /**
+   * Settings → General → Appearance → Frame transparency (macOS glass): 0 solid … 100 clearest,
+   * FRAME_TRANSPARENCY_DEFAULT the stock look. Maps to the frame and hover-card tints in
+   * shared/sidebar-card.ts (frameGlassTints).
+   */
+  frameTransparency: number;
+  /**
+   → Settings → General → Appearance → Sidebar layout: how the hover/pinned sidebar sits over a live
+   * page. →'resize'/'slide' push the page card aside (Sidebar animation says how) and are the
+   * frame's own material, like the docked panel; →'float' floats the panel over the page as its own
+   * card (the earlier look). Collapsed from the earlier toggle + select into one control.
+   */
+  sidebarPageMode: SidebarPageMode;
+  /**
+   * Settings → General → Appearance → Swipe slides page (macOS trackpad back/forward). Off
+   * (default): only the Back/Forward card shows over the page while the fingers move. On: the page
+   * also slides sideways with them, the earlier look.
+   */
+  swipeSlidesPage: boolean;
 }
 
 export const DEFAULT_SIDEBAR_BACKDROP_SETTINGS: SidebarBackdropSettings = {
   blur: true,
+  frameTransparency: FRAME_TRANSPARENCY_DEFAULT,
+  sidebarPageMode: DEFAULT_SIDEBAR_PAGE_MODE,
+  swipeSlidesPage: false,
 };
 
 /** Sent to the sidebar surface whenever the mode or the snapshot changes. */
@@ -37,8 +106,8 @@ export interface SidebarBackdropState {
   mode: SidebarBackdropMode;
   /** Only in 'snapshot' mode: page pieces under the sidebar view, positioned in sidebar-view DIPs. */
   images: SidebarBackdropImage[];
-  /** The sidebar view is inset + rounded to the card (it has used the native blur in this window). */
-  framed: boolean;
+  /** True only while a separate native background View is shown behind a floating sidebar. */
+  nativeOverlay: boolean;
 }
 
 export interface SidebarBackdropImage {
@@ -56,15 +125,26 @@ export interface Rect {
   height: number;
 }
 
-/** Blur radius for the native compositor blur (px). */
-export const SIDEBAR_NATIVE_BLUR_RADIUS = 36;
-/** ARGB tint under the native blur: dark enough to read white text even if no blur shows. */
-export const SIDEBAR_NATIVE_TINT = "#C4131619";
-/** ARGB fill for a card-framed view after leaving the native path (blur off at runtime). */
-export const SIDEBAR_FRAMED_SOLID_TINT = "#F2131619";
-/** The native-blur view is cut to the card: same numbers the CSS reads (shared/sidebar-card.ts). */
-export const SIDEBAR_CARD_INSET = SIDEBAR_CARD.inset;
-export const SIDEBAR_CARD_RADIUS = SIDEBAR_CARD.radius;
+/** Blur radius under the glass hover card at rest (macOS glass): the page reads as frosted glass. */
+export const SIDEBAR_HOVER_GLASS_BLUR = 30;
+
+/**
+ * Native hover layer paint. The backing View is only shown while the sidebar overlay is visible;
+ * keep its material ready on the first frame and let its native bounds/radius carry the motion.
+ * Ramping alpha with the slide leaves the remote page legible through the expanding card, which a
+ * renderer-side CSS mask cannot clip because the page is a separate native WebContentsView.
+ */
+export function sidebarNativeLayerPaint(
+  _progress: number,
+  { glass = false }: { glass?: boolean } = {},
+): {
+  alpha: number;
+  blur: number;
+} {
+  // The View is clipped/rounded and moved in lockstep with the card. It must already cover or blur
+  // the page beneath the very first visible frame, before labels and pin marks finish morphing.
+  return { alpha: 1, blur: glass ? SIDEBAR_HOVER_GLASS_BLUR : 0 };
+}
 /** Fraction of the captured bitmap's physical width kept before the one-off canvas blur. */
 export const SIDEBAR_SNAPSHOT_SCALE = 0.25;
 /** At most one snapshot per this many ms while the sidebar stays open. */
@@ -81,6 +161,18 @@ export function normalizeSidebarBackdropSettings(
       typeof candidate.blur === "boolean"
         ? candidate.blur
         : DEFAULT_SIDEBAR_BACKDROP_SETTINGS.blur,
+    frameTransparency: normalizeFrameTransparency(candidate.frameTransparency),
+    sidebarPageMode:
+      typeof candidate.sidebarPageMode === "string"
+        ? normalizeSidebarPageMode(candidate.sidebarPageMode)
+        : modeFromLegacy(
+            candidate.sidebarPushesPage,
+            candidate.sidebarPushStyle,
+          ),
+    swipeSlidesPage:
+      typeof candidate.swipeSlidesPage === "boolean"
+        ? candidate.swipeSlidesPage
+        : DEFAULT_SIDEBAR_BACKDROP_SETTINGS.swipeSlidesPage,
   };
 }
 
@@ -95,9 +187,10 @@ export function parseSidebarBackdropOverride(
 }
 
 /**
- * Which path the overlay sidebar uses. Blur off is always solid. macOS defaults to the native
- * compositor blur; other platforms stay on the solid tint. `override` (SURFFISH_SIDEBAR_BACKDROP)
- * picks a path explicitly for testing: blur off still wins.
+ * Which path the overlay sidebar uses. Blur off is always solid. macOS defaults to a captured,
+ * renderer-painted snapshot because native WebContentsView page surfaces are separate from the Views
+ * compositor layer used by View.setBackgroundBlur. Other platforms stay on the solid tint.
+ * `override` (SURFFISH_SIDEBAR_BACKDROP) picks a path explicitly for testing: blur off still wins.
  */
 export function resolveSidebarBackdropMode({
   platform,
@@ -105,12 +198,25 @@ export function resolveSidebarBackdropMode({
   override,
 }: {
   platform: NodeJS.Platform | string;
-  settings: SidebarBackdropSettings;
+  settings: Pick<SidebarBackdropSettings, "blur">;
   override?: SidebarBackdropMode | null;
 }): SidebarBackdropMode {
   if (!settings.blur) return "solid";
   if (override) return override;
-  return platform === "darwin" ? "native" : "solid";
+  return platform === "darwin" ? "snapshot" : "solid";
+}
+
+/** The docked sidebar is part of the window frame; only a floating overlay needs its own blur layer. */
+export function shouldUseNativeSidebarLayer({
+  mode,
+  docked,
+  visible,
+}: {
+  mode: SidebarBackdropMode;
+  docked: boolean;
+  visible: boolean;
+}): boolean {
+  return mode === "native" && visible && !docked;
 }
 
 export function intersectRects(a: Rect, b: Rect): Rect | null {

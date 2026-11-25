@@ -3,6 +3,7 @@ import {
   BaseWindow,
   WebContentsView,
   app,
+  ipcMain,
   nativeImage,
   screen,
   shell,
@@ -14,12 +15,14 @@ import {
   renameSync,
   writeFileSync,
 } from "node:fs";
+import { release as systemRelease } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   attachBrowserView,
   handleBrowserShortcutInput,
   setBrowserWindowFactory,
+  slideBrowserPage,
   syncBrowserBoundsToWindow,
   type BrowserWindowInit,
 } from "./browser";
@@ -29,16 +32,23 @@ import {
   currentBrowserWindow,
   registerBrowserWindow,
   runInWindow,
+  windowForContents,
 } from "./window-scope";
 import {
   attachBrowserShell,
+  setBrowserFramePrivate,
+  setHtmlFullscreenState,
+  setNativeFullscreenState,
+  setPageSlideListener,
   detachBrowserShell,
   isFocusAddressShortcut,
   sendFocusAddressToVisibleRenderer,
 } from "./browser-shell";
 import { isExpectedRendererDocument } from "./renderer-security";
 import { APP_NAME, WINDOW } from "../shared/config";
+import { SIDEBAR_CARD } from "../shared/sidebar-card";
 import { retryOnce } from "../shared/retry";
+import { resolveWindowFrameMaterial } from "../shared/window-frame-material";
 import {
   fitBoundsToDisplays,
   parseSavedWindowState,
@@ -47,9 +57,39 @@ import {
 } from "../shared/window-geometry";
 import { createFileTextCache } from "../shared/write-skip";
 import { watchShellSurface } from "./crash-guard";
+import { applyNativeFullscreenWindowButtons } from "./native-fullscreen-window-buttons";
 
 const WINDOW_STATE_FILE = "window-state.json";
 const SAVE_DELAY_MS = 400;
+const FULLSCREEN_EVENT_SETTLE_MS = 50;
+
+interface BrowserFullscreenState {
+  windowFullscreen: boolean;
+  nativeFullscreen: boolean;
+  htmlFullscreen: boolean;
+}
+
+const fullscreenStates = new WeakMap<BaseWindow, BrowserFullscreenState>();
+
+ipcMain.handle(
+  "browser:window-fullscreen-state",
+  (event): BrowserFullscreenState => {
+    const window = windowForContents(event.sender);
+    if (!window)
+      return {
+        windowFullscreen: false,
+        nativeFullscreen: false,
+        htmlFullscreen: false,
+      };
+    return (
+      fullscreenStates.get(window) ?? {
+        windowFullscreen: window.isFullScreen(),
+        nativeFullscreen: false,
+        htmlFullscreen: false,
+      }
+    );
+  },
+);
 
 function windowStatePath(): string {
   return join(app.getPath("userData"), WINDOW_STATE_FILE);
@@ -308,6 +348,12 @@ export function createWindow(options: CreateWindowOptions = {}): BaseWindow {
   const geometry = options.position
     ? null
     : (options.geometry ?? (browserWindows().length === 0 ? savedState : null));
+  const windowFrameMaterial = resolveWindowFrameMaterial({
+    platform: process.platform,
+    osRelease: systemRelease(),
+    supportsWindowsBackgroundMaterial:
+      typeof BaseWindow.prototype.setBackgroundMaterial === "function",
+  });
   const win = new BaseWindow({
     title: APP_NAME,
     icon: appIconPath,
@@ -317,11 +363,20 @@ export function createWindow(options: CreateWindowOptions = {}): BaseWindow {
     show: false,
     autoHideMenuBar: true,
     titleBarStyle: isMac ? "hiddenInset" : "default",
-    trafficLightPosition: isMac ? { x: 16, y: 16 } : undefined,
+    trafficLightPosition: isMac
+      ? { x: SIDEBAR_CARD.controlsLeft, y: SIDEBAR_CARD.controlsTop }
+      : undefined,
     transparent: isMac,
-    vibrancy: isMac ? "fullscreen-ui" : undefined,
+    vibrancy: isMac ? "sidebar" : undefined,
     visualEffectState: isMac ? "active" : undefined,
+    backgroundMaterial:
+      windowFrameMaterial === "windows-mica" ? "mica" : undefined,
     backgroundColor: isMac ? "#00000000" : "#101418",
+  });
+  fullscreenStates.set(win, {
+    windowFullscreen: win.isFullScreen(),
+    nativeFullscreen: false,
+    htmlFullscreen: false,
   });
   if (isMac) app.dock?.setIcon(nativeImage.createFromPath(appIconPath));
   registerBrowserWindow(win);
@@ -341,12 +396,72 @@ export function createWindow(options: CreateWindowOptions = {}): BaseWindow {
   win.contentView.addChildView(contentView);
   win.contentView.addChildView(toolbarView);
   win.contentView.addChildView(sidebarView);
+  let htmlFullscreen = false;
+  let nativeFullscreen = false;
+  let fullscreenSyncTimer: ReturnType<typeof setTimeout> | null = null;
+  const broadcastFullscreen = (): void => {
+    if (win.isDestroyed()) return;
+    const state = {
+      windowFullscreen: win.isFullScreen(),
+      nativeFullscreen,
+      htmlFullscreen,
+    };
+    fullscreenStates.set(win, state);
+    applyNativeFullscreenWindowButtons(
+      process.platform,
+      nativeFullscreen,
+      (visible) => win.setWindowButtonVisibility(visible),
+    );
+    setHtmlFullscreenState(win, htmlFullscreen);
+    setNativeFullscreenState(win, nativeFullscreen);
+    for (const view of [contentView, toolbarView, sidebarView]) {
+      if (!view.webContents.isDestroyed()) {
+        view.webContents.send(
+          "browser:window-fullscreen",
+          state.windowFullscreen,
+          state.nativeFullscreen,
+          state.htmlFullscreen,
+        );
+      }
+    }
+  };
+  const syncNativeFullscreen = (): void => {
+    if (fullscreenSyncTimer) clearTimeout(fullscreenSyncTimer);
+    fullscreenSyncTimer = setTimeout(() => {
+      fullscreenSyncTimer = null;
+      if (win.isDestroyed()) return;
+      const windowFullscreen = win.isFullScreen();
+      if (!windowFullscreen) nativeFullscreen = false;
+      else if (!htmlFullscreen) nativeFullscreen = true;
+      broadcastFullscreen();
+    }, FULLSCREEN_EVENT_SETTLE_MS);
+  };
+  win.on("enter-full-screen", syncNativeFullscreen);
+  win.on("leave-full-screen", syncNativeFullscreen);
+  const htmlFullscreenEvents = win as unknown as {
+    on(
+      event: "enter-html-full-screen" | "leave-html-full-screen",
+      listener: () => void,
+    ): void;
+  };
+  htmlFullscreenEvents.on("enter-html-full-screen", () => {
+    htmlFullscreen = true;
+    broadcastFullscreen();
+  });
+  htmlFullscreenEvents.on("leave-html-full-screen", () => {
+    htmlFullscreen = false;
+    if (!win.isFullScreen()) nativeFullscreen = false;
+    broadcastFullscreen();
+  });
+  // The hover panel pushing the page aside moves the page card frame by frame (browser.ts).
+  setPageSlideListener(slideBrowserPage);
   attachBrowserShell(
     win,
     { content: contentView, toolbar: toolbarView, sidebar: sidebarView },
     rendererDocuments,
     syncBrowserBoundsToWindow,
   );
+  setBrowserFramePrivate(win, options.private === true);
   attachBrowserView(win, {
     private: options.private,
     session: options.session,

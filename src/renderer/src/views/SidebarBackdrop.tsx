@@ -141,5 +141,5 @@ export function sidebarBackdropClass(
   state: SidebarBackdropState | null,
 ): string {
   if (surface !== "sidebar") return "";
-  return ` has-backdrop-${state?.mode ?? "solid"}${state?.framed ? " is-view-framed" : ""}`;
+  return ` has-backdrop-${state?.mode ?? "solid"}`;
 }

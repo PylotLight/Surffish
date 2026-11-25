@@ -546,7 +546,9 @@ async function run() {
   // The sidebar pinned open (an auto-hidden one has nothing on screen to drop on).
   const sidebarShown = () => {
     const view = surface("sidebar");
-    return !view || (view.getVisible() && view.getBounds().x >= 0);
+    if (!view || !view.getVisible()) return false;
+    const bounds = view.getBounds();
+    return bounds.x >= 0 && bounds.width > 100;
   };
   if (!sidebarShown()) await run("view.toggleSidebar");
   await waitFor(sidebarShown, "the sidebar pinned open");

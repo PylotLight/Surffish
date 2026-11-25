@@ -9,11 +9,17 @@ export function useUpdateState(): [
   const [state, setState] = useState<UpdateState | null>(null);
   useEffect(() => {
     let cancelled = false;
-    const unsubscribe = window.api.browser.updates.onChange(setState);
+    // A push can arrive before the initial get() reply (separate IPC channels); once one has,
+    // the get() result is older and must not overwrite it (e.g. re-showing a snoozed badge).
+    let pushed = false;
+    const unsubscribe = window.api.browser.updates.onChange((next) => {
+      pushed = true;
+      setState(next);
+    });
     void window.api.browser.updates
       .get()
       .then((next) => {
-        if (!cancelled) setState(next);
+        if (!cancelled && !pushed) setState(next);
       })
       .catch(() => undefined);
     return () => {

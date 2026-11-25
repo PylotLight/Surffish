@@ -14,7 +14,7 @@
   padding: 0 2px 0 6px;
   border-radius: 7px;
 }
-.tab-split-pane:hover {
+.tab-split-pane:hover:not(:where([data-reshaping] *)) {
   background: rgba(255, 255, 255, 0.045);
 }
 .tab-split-pane.is-focused {
@@ -34,7 +34,7 @@
   font-size: 15px;
   opacity: 0;
 }
-.tab-split-pane:hover .tab-close,
+.tab-split-pane:hover:not(:where([data-reshaping] *)) .tab-close,
 .tab-split-pane.is-focused .tab-close {
   opacity: 1;
 }

@@ -3,7 +3,8 @@
 process.env.SURFFISH_SIDEBAR_CURSOR_POLL ??= "off";
 // The sidebar card must sit on exactly the same window pixels whether the content renderer draws
 // it in-page (New Tab, full panels) or the overlay sidebar view draws it above a live page:
-// x/y/width/height, radius, border, shadow, and the window-control / pinned / tab-list offsets.
+// x/y/width/height, radius, border, shadow, and the pinned / tab-list offsets. Both start at the
+// toolbar's bottom line (the browser frame: the toolbar strip holds the traffic lights).
 // Checks docked and hover-revealed, a private window, and Spaces on. Run once per backdrop path:
 //
 //   SURFFISH_SIDEBAR_BACKDROP=native|solid|snapshot  path to test (default: the platform's own)
@@ -22,7 +23,8 @@ const { ElectronBlocker } = require("@ghostery/adblocker-electron");
 const userData = join(tmpdir(), `surffish-sidebar-card-smoke-${process.pid}`);
 const screenshotDirectory = process.env.SURFFISH_SCREENSHOT_DIR;
 const label = process.env.SURFFISH_SIDEBAR_BACKDROP || "default";
-const TOLERANCE = 1;
+// Card and surface geometry: whole CSS pixels on both surfaces, so half a pixel is already a miss.
+const TOLERANCE = 0.5;
 
 const server = createServer((request, response) => {
   response.writeHead(200, {
@@ -112,19 +114,13 @@ function captureWindow(win, name) {
   ]);
 }
 
-// Card + inner offsets in the view's own coordinates. A `.sidebar-window-controls` probe stands in
-// for the macOS dots on other platforms (same element + CSS), so their spacing is checked here too.
+// Card + inner offsets in the view's own coordinates.
 const MEASURE = `(() => {
   const card = document.querySelector('.browser-sidebar')
   if (!card) return null
-  let probe = null
-  if (!card.querySelector('.sidebar-window-controls')) {
-    probe = document.createElement('div')
-    probe.className = 'sidebar-window-controls'
-    for (let i = 0; i < 3; i++) { const dot = document.createElement('span'); dot.className = 'sidebar-window-control'; probe.appendChild(dot) }
-    card.insertBefore(probe, card.firstChild)
-  }
   const rect = (node) => { if (!node) return null; const r = node.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height } }
+  const rail = card.querySelector('.sidebar-rail')
+  const panel = card.querySelector('.sidebar-panel')
   const s = getComputedStyle(card)
   const out = {
     className: card.className,
@@ -132,14 +128,16 @@ const MEASURE = `(() => {
     radius: s.borderTopLeftRadius + ' ' + s.borderTopRightRadius + ' ' + s.borderBottomRightRadius + ' ' + s.borderBottomLeftRadius,
     border: s.borderTopWidth + ' ' + s.borderRightWidth + ' ' + s.borderBottomWidth + ' ' + s.borderLeftWidth + ' ' + s.borderTopStyle + ' ' + s.borderTopColor,
     shadow: s.boxShadow,
-    controls: rect(card.querySelector('.sidebar-window-controls')),
-    firstDot: rect(card.querySelector('.sidebar-window-control')),
+    rail: rect(rail),
+    railHidden: Boolean(rail?.classList.contains('is-shape-hidden')),
+    panelHidden: Boolean(panel?.classList.contains('is-shape-hidden')),
+    railActions: rect(card.querySelector('.sidebar-rail-footer')),
+    pin: rect(card.querySelector('.sidebar-morph-column:not(.is-shape-hidden) .sidebar-pin-button')),
     pinned: rect(card.querySelector('.sidebar-pinned-sites')),
     tabList: rect(card.querySelector('.tab-list')),
     firstTab: rect(card.querySelector('.tab-item')),
     footer: rect(card.querySelector('.sidebar-footer'))
   }
-  probe?.remove()
   return out
 })()`;
 
@@ -161,8 +159,9 @@ async function measure(win, which) {
     ...raw,
     view: bounds,
     card: shift(raw.card),
-    controls: shift(raw.controls),
-    firstDot: shift(raw.firstDot),
+    rail: shift(raw.rail),
+    railActions: shift(raw.railActions),
+    pin: shift(raw.pin),
     pinned: shift(raw.pinned),
     tabList: shift(raw.tabList),
     firstTab: shift(raw.firstTab),
@@ -171,10 +170,20 @@ async function measure(win, which) {
 }
 
 function assertSame(inPage, overlay, context) {
+  assert.equal(
+    inPage.railHidden,
+    overlay.railHidden,
+    `${context}: rail shape state`,
+  );
+  assert.equal(
+    inPage.panelHidden,
+    overlay.panelHidden,
+    `${context}: panel shape state`,
+  );
   for (const key of [
     "card",
-    "controls",
-    "firstDot",
+    "rail",
+    "railActions",
     "pinned",
     "tabList",
     "firstTab",
@@ -260,19 +269,25 @@ async function compare(win, { context, liveUrl, chrome, shot }) {
   await settle();
   let overlay = await measure(win, "sidebar");
   // Hover mode under Xvfb: the real X pointer sits over the page, so main's page-exit timer can
-  // un-hover the sidebar before we measure. Re-hover with the pointer inside the card, like a user.
+  // un-hover the sidebar before we measure. Re-hover inside the rail, which is only 84px wide when
+  // collapsed; a point farther right misses the view and cannot open the panel.
+  const { sidebarWidth: targetSidebarWidth } = await api(win, "chrome.get()");
+  const [windowWidth] = win.getContentSize();
+  const openWidth = Math.min(targetSidebarWidth, windowWidth - 48);
   for (
     let attempt = 0;
     attempt < 3 &&
     chrome.sidebarHovered &&
-    Math.abs(overlay.card.x) > TOLERANCE;
+    overlay.view.width < openWidth - TOLERANCE;
     attempt++
   ) {
     await api(win, reveal);
-    sidebar.webContents.sendInputEvent({ type: "mouseMove", x: 100, y: 300 });
+    sidebar.webContents.sendInputEvent({ type: "mouseMove", x: 30, y: 300 });
     await waitFor(
-      () => sidebar.getVisible() && sidebar.getBounds().width > 0,
-      `the overlay sidebar again (${context})`,
+      () =>
+        sidebar.getVisible() &&
+        sidebar.getBounds().width >= openWidth - TOLERANCE,
+      `the expanded overlay sidebar again (${context})`,
     );
     await settle();
     overlay = await measure(win, "sidebar");
@@ -284,29 +299,300 @@ async function compare(win, { context, liveUrl, chrome, shot }) {
     inPage: inPage.card,
     overlay: overlay.card,
     view: overlay.view,
-    framed: overlay.className.includes("is-view-framed"),
   });
   assertSame(inPage, overlay, `${label} / ${context}`);
-  // And both are where shared/sidebar-card.ts says.
+  // Both surfaces start at the toolbar's bottom line and reach the window's bottom.
   const [width, height] = win.getContentSize();
   const { sidebarWidth } = await api(win, "chrome.get()");
+  const toolbarBottom = await evaluate(
+    surface(win, "toolbar"),
+    'document.querySelector(".browser-chrome").getBoundingClientRect().bottom',
+  );
   const expected = {
     x: 0,
-    y: 10,
+    y: toolbarBottom,
     width: Math.min(sidebarWidth, width - 48),
-    height: height - 20,
+    height: height - toolbarBottom,
   };
   for (const field of ["x", "y", "width", "height"])
     assert.ok(
-      Math.abs(inPage.card[field] - expected[field]) <= TOLERANCE,
+      Math.abs(inPage.card[field] - expected[field]) <= 1,
       `${context}: card.${field} ${inPage.card[field]} vs expected ${expected[field]}`,
     );
-  assert.equal(inPage.radius, "28px 28px 28px 28px", `${context}: card radius`);
+  assert.equal(
+    inPage.radius,
+    "0px 0px 0px 0px",
+    `${context}: the sidebar is part of the frame: square, no rounded corner at the toolbar`,
+  );
+  for (const surface of [inPage, overlay]) {
+    if (surface.rail && !surface.railHidden) {
+      assert.ok(
+        Math.abs(
+          surface.rail.y +
+            surface.rail.height -
+            (surface.card.y + surface.card.height),
+        ) <= TOLERANCE,
+        `${context}: collapsed sidebar reaches the bottom edge`,
+      );
+      assert.ok(
+        surface.railActions.y + surface.railActions.height <=
+          surface.rail.y + surface.rail.height + TOLERANCE,
+        `${context}: collapsed actions stay anchored inside the bottom edge`,
+      );
+    }
+  }
 
   await api(
     win,
     "chrome.set({ sidebarPinned: false, sidebarHovered: false, sidebarFocused: false })",
   );
+}
+
+const VISIBLE_PIN_RECT =
+  '(() => { const pin = document.querySelector(".browser-sidebar .sidebar-morph-column:not(.is-shape-hidden) .sidebar-pin-button"); if (!pin) return null; const r = pin.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()';
+
+const VISIBLE_FIRST_TAB_MARK =
+  '(() => { const marks = document.querySelectorAll(".browser-sidebar .sidebar-morph-column:not(.is-shape-hidden) [data-motion-key^=\\"tab:\\"] .tab-favicon"); const mark = marks[marks.length - 1]; if (!mark) return null; const r = mark.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()';
+
+const VISIBLE_NEW_TAB_MARK =
+  '(() => { const mark = document.querySelector(".browser-sidebar .sidebar-morph-column:not(.is-shape-hidden) [data-motion-key=\\"new-tab\\"] .sidebar-new-tab-row-icon"); if (!mark) return null; const r = mark.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()';
+
+// What a click at a point lands on: the rail's + when collapsed, the panel's New Tab row when open.
+const hitAt = (point) =>
+  `(() => { const hit = document.elementFromPoint(${point.x + point.width / 2}, ${point.y + point.height / 2}); return hit?.closest(".sidebar-rail-new-tab") ? "rail" : hit?.closest(".sidebar-new-tab-row") ? "panel" : hit ? hit.className || hit.tagName : null; })()`;
+
+// A mark must land on the very device pixels it left: half a CSS pixel is a whole device pixel at
+// 2x, which is exactly the shift the eye catches on collapse/expand. Compare painted positions
+// (layout snapped to the device-pixel grid), so a layout-only half-pixel difference that paints
+// the same does not count, and one that paints a pixel off does.
+const devicePixels = (value, dpr) => Math.round(value * dpr) / dpr;
+function samePaintedSpot(a, b, dpr, fields = ["x", "y", "width", "height"]) {
+  return Boolean(
+    a &&
+    b &&
+    fields.every(
+      (field) =>
+        Math.abs(devicePixels(a[field], dpr) - devicePixels(b[field], dpr)) <
+        0.01,
+    ),
+  );
+}
+
+function assertPinStill(collapsedPin, expandedPin, context, dpr) {
+  assert.ok(
+    collapsedPin && expandedPin,
+    `${context}: the sidebar pin is drawn in both shapes`,
+  );
+  assert.ok(
+    samePaintedSpot(collapsedPin, expandedPin, dpr),
+    `${context}: the sidebar pin stays put between rail and panel (dpr ${dpr}): ${JSON.stringify({ collapsedPin, expandedPin })}`,
+  );
+}
+
+async function assertSidebarState(win, which, context, expanded) {
+  const view = surface(win, which);
+  const [windowWidth, windowHeight] = win.getContentSize();
+  const toolbarBottom = await evaluate(
+    surface(win, "toolbar"),
+    'Math.round(document.querySelector(".browser-chrome").getBoundingClientRect().bottom)',
+  );
+  const { sidebarWidth } = await api(win, "chrome.get()");
+  const expectedWidth = expanded
+    ? Math.min(sidebarWidth, windowWidth - 48)
+    : Math.min(84, windowWidth - 48);
+  const state = await evaluate(
+    view,
+    `(() => {
+      const layout = document.querySelector('.browser-layout')
+      const card = document.querySelector('.browser-sidebar')
+      const rail = card?.querySelector('.sidebar-rail')
+      const panel = card?.querySelector('.sidebar-panel')
+      if (!layout || !card || !rail || !panel) return null
+      const rect = (node) => { const r = node.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height } }
+      return {
+        hasRail: card.classList.contains('has-rail'),
+        collapsed: card.classList.contains('is-collapsed'),
+        expanded: layout.classList.contains('is-sidebar-visible'),
+        visibility: getComputedStyle(card).visibility,
+        card: rect(card), rail: rail ? rect(rail) : null,
+        railHidden: rail.classList.contains('is-shape-hidden'),
+        panelHidden: panel.classList.contains('is-shape-hidden'),
+        railPresent: Boolean(rail),
+        panelPresent: Boolean(panel),
+        panelWidth: panel ? rect(panel).width : null
+      }
+    })()`,
+  );
+  assert.ok(state, `${context}: sidebar card is mounted`);
+  assert.equal(state.hasRail, true, `${context}: tab mode keeps the icon rail`);
+  assert.equal(state.visibility, "visible", `${context}: sidebar is visible`);
+  assert.equal(state.railPresent, true, `${context}: rail stays mounted`);
+  assert.equal(state.panelPresent, true, `${context}: panel stays mounted`);
+  assert.equal(
+    state.railHidden,
+    expanded,
+    `${context}: inactive rail is hidden`,
+  );
+  assert.equal(
+    state.panelHidden,
+    !expanded,
+    `${context}: inactive panel is hidden`,
+  );
+  assert.ok(
+    Math.abs(state.card.x) <= TOLERANCE &&
+      Math.abs(state.card.y - toolbarBottom) <= TOLERANCE &&
+      Math.abs(state.card.width - expectedWidth) <= TOLERANCE &&
+      Math.abs(state.card.height - (windowHeight - toolbarBottom)) <= TOLERANCE,
+    `${context}: ${expanded ? "expanded" : "collapsed"} card geometry ${JSON.stringify(state.card)}`,
+  );
+  if (expanded) {
+    assert.ok(
+      Math.abs(state.panelWidth - state.card.width) <= TOLERANCE,
+      `${context}: expanded tab panel fills the same sidebar surface`,
+    );
+  } else {
+    assert.ok(
+      state.rail.width > 0 &&
+        Math.abs(state.rail.y + state.rail.height - windowHeight) <= TOLERANCE,
+      `${context}: icon-only sidebar reaches the bottom edge`,
+    );
+  }
+  assert.equal(state.collapsed, !expanded, `${context}: collapsed state`);
+  assert.equal(state.expanded, expanded, `${context}: expanded state`);
+  if (screenshotDirectory) {
+    const image = await view.webContents.capturePage();
+    writeFileSync(
+      join(
+        screenshotDirectory,
+        `sidebar-webcontents-${which}-${expanded ? "expanded" : "collapsed"}.png`,
+      ),
+      image.toPNG(),
+    );
+  }
+  return state;
+}
+
+async function verifyCollapsedAndExpanded(win, liveUrl) {
+  const tabs = await api(win, "tabs.get()");
+  const local =
+    tabs.find((tab) => tab.url.startsWith("surffish://")) ?? tabs[0];
+  await api(win, `tabs.create(${JSON.stringify(liveUrl)})`);
+  const live = await waitFor(
+    async () =>
+      (await api(win, "tabs.get()")).find(
+        (tab) => tab.url === liveUrl && !tab.loading,
+      ),
+    "the collapsed-rail live tab",
+  );
+
+  for (const [which, tabId] of [
+    ["content", local.id],
+    ["sidebar", live.id],
+  ]) {
+    await api(win, `tabs.activate(${JSON.stringify(tabId)})`);
+    await api(
+      win,
+      "chrome.set({ sidebarMode: 'tabs', sidebarPinned: false, sidebarHovered: false, sidebarFocused: false })",
+    );
+    const view = surface(win, which);
+    const open = which === "content";
+    await waitFor(
+      () =>
+        open
+          ? view.getVisible() && !surface(win, "sidebar").getVisible()
+          : view.getVisible() && view.getBounds().width > 0,
+      `${which} collapsed rail surface`,
+    );
+    await waitFor(async () => {
+      const state = await evaluate(
+        view,
+        'Boolean(document.querySelector(".browser-sidebar.has-rail.is-collapsed"))',
+      );
+      return state;
+    }, `${which} collapsed rail DOM`);
+    await settle();
+    await assertSidebarState(win, which, `${which} collapsed`, false);
+    const dpr = await evaluate(view, "window.devicePixelRatio || 1");
+    const collapsedPin = await evaluate(view, VISIBLE_PIN_RECT);
+    const collapsedTab = await evaluate(view, VISIBLE_FIRST_TAB_MARK);
+    const collapsedPlus = await evaluate(view, VISIBLE_NEW_TAB_MARK);
+    assert.ok(collapsedPlus, `${which}: the rail draws a New tab +`);
+    assert.equal(
+      await evaluate(view, hitAt(collapsedPlus)),
+      "rail",
+      `${which}: a click on the rail's + lands on the rail's New tab button`,
+    );
+    captureWindow(win, `sidebar-${which}-collapsed.png`);
+
+    await evaluate(
+      view,
+      'document.querySelector(".sidebar-rail-pin")?.click()',
+    );
+    const { sidebarWidth } = await api(win, "chrome.get()");
+    const [windowWidth] = win.getContentSize();
+    const expandedWidth = Math.min(sidebarWidth, windowWidth - 48);
+    if (which === "sidebar")
+      await waitFor(
+        () => view.getBounds().width >= expandedWidth - TOLERANCE,
+        "overlay sidebar to expand from the rail",
+      );
+    await waitFor(
+      async () =>
+        Boolean(
+          await evaluate(
+            view,
+            '(() => { const card = document.querySelector(".browser-layout.is-sidebar-visible .browser-sidebar.has-rail:not(.is-collapsed)"); const rail = card?.querySelector(".sidebar-rail"); const panel = card?.querySelector(".sidebar-panel"); return Boolean(card && rail?.classList.contains("is-shape-hidden") && panel && !panel.classList.contains("is-shape-hidden") && getComputedStyle(panel).display !== "none"); })()',
+          ),
+        ),
+      `${which} expanded panel DOM`,
+    );
+    await settle();
+    await assertSidebarState(win, which, `${which} expanded`, true);
+    assertPinStill(
+      collapsedPin,
+      await evaluate(view, VISIBLE_PIN_RECT),
+      which,
+      dpr,
+    );
+    const expandedTab = await evaluate(view, VISIBLE_FIRST_TAB_MARK);
+    assert.ok(
+      samePaintedSpot(collapsedTab, expandedTab, dpr),
+      `${which}: the last tab's favicon stays put between rail and panel (dpr ${dpr}): ${JSON.stringify({ collapsedTab, expandedTab })}`,
+    );
+    const expandedPlus = await evaluate(view, VISIBLE_NEW_TAB_MARK);
+    assert.ok(
+      samePaintedSpot(collapsedPlus, expandedPlus, dpr),
+      `${which}: the New tab + stays put between rail and panel (dpr ${dpr}): ${JSON.stringify({ collapsedPlus, expandedPlus })}`,
+    );
+    assert.equal(
+      await evaluate(view, hitAt(collapsedPlus)),
+      "panel",
+      `${which}: the rail's + spot lands on the panel's New Tab row once it opens`,
+    );
+    captureWindow(win, `sidebar-${which}-expanded.png`);
+
+    await api(
+      win,
+      "chrome.set({ sidebarPinned: false, sidebarHovered: false, sidebarFocused: false })",
+    );
+    if (which === "sidebar")
+      await waitFor(
+        () => view.getBounds().width <= 84 + TOLERANCE,
+        "overlay sidebar to return to the collapsed rail",
+      );
+    await waitFor(
+      async () =>
+        Boolean(
+          await evaluate(
+            view,
+            'Boolean(document.querySelector(".browser-sidebar.has-rail.is-collapsed"))',
+          ),
+        ),
+      `${which} rail restored after closing the panel`,
+    );
+    await settle();
+    await assertSidebarState(win, which, `${which} collapsed again`, false);
+  }
 }
 
 async function run() {
@@ -341,6 +627,7 @@ async function run() {
       (process.platform === "darwin" ? "native" : "solid"),
     "the expected backdrop path",
   );
+  await verifyCollapsedAndExpanded(win, `${origin}/collapsed-rail`);
 
   await compare(win, {
     context: "docked",
@@ -388,8 +675,8 @@ async function run() {
     'getComputedStyle(document.querySelector(".browser-sidebar")).boxShadow',
   );
   assert.ok(
-    (spacesShadow.match(/inset/g) || []).length >= 3,
-    `Spaces keeps the card shadows (${spacesShadow})`,
+    (spacesShadow.match(/inset/g) || []).length >= 2,
+    `Spaces keeps the integrated sidebar edge and active-space accent (${spacesShadow})`,
   );
 
   // A private window.
@@ -408,7 +695,7 @@ async function run() {
   await compare(privateWindow, {
     context: "private",
     liveUrl: `${origin}/p`,
-    chrome: { sidebarHovered: true },
+    chrome: { sidebarPinned: true },
     shot: `sidebar-card-${label}-private`,
   });
   assert.ok(

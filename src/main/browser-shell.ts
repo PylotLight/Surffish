@@ -1,3 +1,6 @@
+// Namespace import: browser-shell is loaded by plain bun unit tests, where 'electron' is just a
+// path string and a named value import would fail to link.
+import * as electron from "electron";
 import type {
   BaseWindow,
   WebContents,
@@ -15,9 +18,15 @@ import {
   normalizeSidebarWidth,
 } from "../shared/persistence";
 import {
-  SIDEBAR_CARD,
-  sidebarCardInset,
+  browserFrameGroundArgb,
+  browserFrameIsGlass,
+  FRAME_TRANSPARENCY_DEFAULT,
+  frameTransparencyAllowsGlass,
+  normalizeFrameTransparency,
   sidebarCardMaxWidth,
+  sidebarHoverCardArgb,
+  sidebarRailWidthForState,
+  SIDEBAR_FLOAT,
 } from "../shared/sidebar-card";
 import {
   POPOVER_DISMISS_CHANNEL,
@@ -27,9 +36,27 @@ import {
   type PopoverDismissReason,
   type ToolbarPopoverState,
 } from "../shared/popover-dismiss";
+import {
+  pageFrameLeft,
+  pageSlideOffset,
+  type SidebarPushStyle,
+} from "../shared/page-view-bounds";
+import {
+  DEFAULT_SIDEBAR_PAGE_MODE,
+  sidebarPushesPageForMode,
+  sidebarPushStyleForMode,
+  type SidebarPageMode,
+} from "../shared/sidebar-backdrop";
+import {
+  trackPageFullScreen,
+  type PageFullScreenTracker,
+} from "./page-fullscreen";
 import { isAuthorizedShellIpcSender } from "./renderer-security";
 import { bindContentsToWindow, currentBrowserWindow } from "./window-scope";
-import { SidebarOverlayMotion } from "./sidebar-motion";
+import {
+  SidebarOverlayMotion,
+  type SidebarMotionFrame,
+} from "./sidebar-motion";
 import { SidebarRevealGuard } from "./sidebar-reveal-guard";
 
 const REVEAL_WIDTH = 14;
@@ -73,6 +100,10 @@ type BrowserShellLayoutSync = (
   height: number,
   overlayMode: boolean,
   window: BaseWindow,
+  /** Where the browser frame's left side ends for live pages, null for no frame (shared/page-view-bounds.ts). */
+  frameLeft: number | null,
+  /** Window fullscreen (native or a page's HTML fullscreen): the live page fills the whole window. */
+  contentOnly: boolean,
 ) => void;
 
 /** One window's shell: its three renderer surfaces and the chrome (sidebar/toolbar) state they share. */
@@ -91,9 +122,37 @@ interface ShellState {
   /** Slides the overlay sidebar view along one open/close timeline (sidebar-motion.ts). */
   sidebarMotion: SidebarOverlayMotion;
   lastOverlayMode: boolean | null;
-  /** Native-blur backdrop: the sidebar view is inset to the card and rounded (sidebar-backdrop.ts). */
-  sidebarFrame: { inset: number; radius: number } | null;
   sidebarOverlayShown: boolean;
+  /** The window root's frame surface as last set (diffed: layout runs on every chrome change). */
+  frameGround: string | null;
+  /** Private window: the frame takes the private surface colour (window.ts sets it at creation). */
+  framePrivate: boolean;
+  /** The frame is macOS glass right now (vibrancy under a tint), else the opaque surface. */
+  frameGlass: boolean;
+  /**
+   * The tab list's hover panel is a floating card right now (not docked, live pages, framed): the
+   * overlay view is one SIDEBAR_FLOAT gap wider and the card stands that gap off every frame edge.
+   */
+  sidebarFloating: boolean;
+  /**
+   * The tab list's hover panel pushes the page card aside instead of floating over it (Settings →
+   * Appearance → Sidebar pushes page; live pages, framed, not docked). The panel is then part of
+   * the frame like the docked one (no tint, blur or shadow of its own) and the page card's left
+   * edge follows the panel's edge while its right edge stays (the page resizes beside it).
+   */
+  sidebarPushing: boolean;
+  /** Where the browser frame's left side ends for live pages (pageFrameLeft), as last laid out. */
+  frameLeft: number | null;
+  /** The page card's slide as last sent to browser.ts (px right of its frame position). */
+  pageSlide: number;
+  /** The open push the page card holds its width at while the panel moves; null at rest. */
+  pageSlideHold: number | null;
+  /** Whether the sidebar was last laid out docked (pinned open beside the page), for the backdrop. */
+  sidebarDocked: boolean | null;
+  /** Native app fullscreen, distinct from a site requesting HTML fullscreen. */
+  nativeFullscreen: boolean;
+  /** A page requested HTML fullscreen (for example, a video player's fullscreen action). */
+  htmlFullscreen: boolean;
   /** Light-dismiss listeners (window blur, presses on the sidebar view), kept to remove on detach. */
   dismissOnBlur: () => void;
   dismissOnSidebarPress: (
@@ -108,6 +167,12 @@ interface ShellState {
   revealGuard: SidebarRevealGuard | null;
   /** What the next layout is for, for the sidebar lock debug log. */
   layoutCause: string | null;
+  /** The active page looks expanded: a video filled the window, whether through the
+  // fullscreen API or a video stretched to cover the viewport (how X expands its
+  // in-feed videos). The sidebar gets out of the way when this happens. */
+  pageFullscreen: boolean;
+  /** Watches the content view for an expanded video; stopped on window detach. Null until attached. */
+  pageFullScreenTracker: PageFullScreenTracker;
 }
 
 export type SidebarOverlayEvent = "shown" | "hidden" | "prefetch";
@@ -122,11 +187,153 @@ export function setSidebarOverlayListener(
 }
 
 let sidebarMotionListener:
-  ((window: BaseWindow, progress: number) => void) | null = null;
+  | ((window: BaseWindow, progress: number, frame: SidebarMotionFrame) => void)
+  | null = null;
 
-/** sidebar-backdrop.ts: the overlay sidebar's open progress each frame (0 hidden … 1 open), to ramp the native tint. */
+let sidebarDockListener:
+  ((window: BaseWindow, docked: boolean) => void) | null = null;
+
+/**
+ * sidebar-backdrop.ts: the sidebar became docked (pinned open beside the page card) or stopped
+ * being docked, or the frame's look changed (glass on/off, the hover card floating or not). Docked,
+ * the panel is part of the frame and lets the frame's ground show through, so the sidebar view's
+ * own tint and blur drop away.
+ */
+export function setSidebarDockListener(
+  listener: ((window: BaseWindow, docked: boolean) => void) | null,
+): void {
+  sidebarDockListener = listener;
+}
+
+/** window.ts: a private window's frame takes the private surface colour. */
+export function setBrowserFramePrivate(
+  window: BaseWindow,
+  isPrivate: boolean,
+): void {
+  const shell = shells.get(window);
+  if (!shell || shell.framePrivate === isPrivate) return;
+  shell.framePrivate = isPrivate;
+  shell.scheduleLayout();
+}
+
+/** Settings → Appearance → Sidebar layout mode (sidebar-backdrop.ts owns the setting and calls in). */
+let sidebarPageMode: SidebarPageMode = DEFAULT_SIDEBAR_PAGE_MODE;
+
+/** How a pushed page card moves (browser.ts reads it). Derived from the layout mode. */
+export function getBrowserSidebarPushStyle(): SidebarPushStyle {
+  return sidebarPushStyleForMode(sidebarPageMode);
+}
+
+/** Settings → Appearance → Sidebar layout changed: every window re-lays out (the hover panel floats or pushes, and how a pushed page makes room). Collapsed from the earlier 'pushes page' 'animation' select into one mode. */
+export function setBrowserSidebarPageMode(value: SidebarPageMode): void {
+  if (value === sidebarPageMode) return;
+  sidebarPageMode = value;
+  for (const shell of shells.values()) shell.scheduleLayout();
+}
+
+/** Settings → Appearance → Swipe slides page: whether a back/forward swipe moves the page too. */
+let swipeSlidesPage = false;
+
+export function getBrowserSwipeSlidesPage(): boolean {
+  return swipeSlidesPage;
+}
+
+export function setBrowserSwipeSlidesPage(value: boolean): void {
+  swipeSlidesPage = value;
+}
+
+type PageSlideListener = (
+  window: BaseWindow,
+  dx: number,
+  motionWidthPush: number | null,
+) => void;
+
+let pageSlideListener: PageSlideListener | null = null;
+
+/**
+ * browser.ts: push the window's on-screen page card(s)' left edge `dx` px right of their frame
+ * position, right edge kept (the hover panel pushing the page). Called once per motion frame.
+ */
+export function setPageSlideListener(listener: PageSlideListener | null): void {
+  pageSlideListener = listener;
+}
+
+/** Follow the panel's edge with the page card (0 unless the hover panel pushes the page). */
+function syncPageSlide(shell: ShellState): void {
+  const dx = pageSlideOffset({
+    pushing: shell.sidebarPushing,
+    panelRight: shell.sidebarMotion.visibleRight,
+    frameLeft: shell.frameLeft,
+  });
+  // Mid-motion, the push the open panel rests at: a resizing card holds that width (page-view-bounds).
+  const hold =
+    shell.sidebarMotion.moving && dx > 0
+      ? pageSlideOffset({
+          pushing: shell.sidebarPushing,
+          panelRight: shell.sidebarMotion.openRight,
+          frameLeft: shell.frameLeft,
+        })
+      : null;
+  if (dx === shell.pageSlide && hold === shell.pageSlideHold) return;
+  shell.pageSlide = dx;
+  shell.pageSlideHold = hold;
+  try {
+    pageSlideListener?.(shell.window, dx, hold);
+  } catch (error) {
+    console.warn("Page slide listener failed:", error);
+  }
+}
+
+/** Settings → Appearance → Frame transparency (sidebar-backdrop.ts owns the setting and calls in). */
+let frameTransparency = FRAME_TRANSPARENCY_DEFAULT;
+
+/** The Frame transparency changed: every window re-lays out and re-sets its root ground. */
+export function setBrowserFrameTransparency(value: number): void {
+  const next = normalizeFrameTransparency(value);
+  if (next === frameTransparency) return;
+  frameTransparency = next;
+  for (const shell of shells.values()) shell.scheduleLayout();
+}
+
+/** Whether `window`'s frame is macOS glass right now (sidebar-backdrop.ts paints the hover card to match). */
+export function isBrowserFrameGlass(window: BaseWindow): boolean {
+  return shells.get(window)?.frameGlass === true;
+}
+
+/** The floating hover card's ground for `window`: its glass tint, or the opaque surface. */
+export function getSidebarHoverCardColour(window: BaseWindow): string {
+  const shell = shells.get(window);
+  return sidebarHoverCardArgb({
+    isPrivate: shell?.framePrivate === true,
+    glass: shell?.frameGlass === true,
+    transparency: frameTransparency,
+  });
+}
+
+/** Whether `window`'s tab-list hover panel floats as its own card (see ShellState.sidebarFloating). */
+export function isSidebarFloating(window: BaseWindow): boolean {
+  return shells.get(window)?.sidebarFloating === true;
+}
+
+/** Whether `window`'s tab-list hover panel pushes the page aside (see ShellState.sidebarPushing). */
+export function isSidebarPushing(window: BaseWindow): boolean {
+  return shells.get(window)?.sidebarPushing === true;
+}
+
+/** Whether `window`'s sidebar is docked (pinned open beside the page card) right now. */
+export function isSidebarDocked(window: BaseWindow): boolean {
+  return shells.get(window)?.sidebarDocked === true;
+}
+
+/** sidebar-backdrop.ts: the overlay sidebar's open progress each frame (0 hidden … 1 open), for native shadow visibility. */
 export function setSidebarMotionListener(
-  listener: ((window: BaseWindow, progress: number) => void) | null,
+  listener:
+    | ((
+        window: BaseWindow,
+        progress: number,
+        frame: SidebarMotionFrame,
+      ) => void)
+    | null,
 ): void {
   sidebarMotionListener = listener;
 }
@@ -183,6 +390,39 @@ export function getOverlayToolbarContents(
   return contents.isDestroyed() ? null : contents;
 }
 
+/** macOS System Settings → Accessibility → Display → Reduce transparency. */
+function prefersReducedTransparency(): boolean {
+  try {
+    return electron.nativeTheme?.prefersReducedTransparency === true;
+  } catch {
+    return false;
+  }
+}
+
+/** The system appearance the window's vibrancy material follows. */
+function systemUsesDarkColors(): boolean {
+  try {
+    return electron.nativeTheme?.shouldUseDarkColors !== false;
+  } catch {
+    return true;
+  }
+}
+
+let themeWatched = false;
+/**
+ * Reduce Transparency or the appearance changed: every window's frame swaps between glass and
+ * opaque, or between its dark and light glass wash.
+ */
+function watchFrameTheme(): void {
+  if (themeWatched) return;
+  const theme = electron.nativeTheme;
+  if (!theme || typeof theme.on !== "function") return;
+  themeWatched = true;
+  theme.on("updated", () => {
+    for (const shell of shells.values()) shell.scheduleLayout();
+  });
+}
+
 function shellFor(window?: BaseWindow | null): ShellState | null {
   const target = window ?? currentBrowserWindow();
   const shell = target ? shells.get(target) : undefined;
@@ -208,6 +448,28 @@ function scheduleShellLayout(shell: ShellState): void {
     shell.layoutScheduled = false;
     applyShellLayout(shell);
   });
+}
+
+/** Keep native app fullscreen separate from page-requested HTML fullscreen. */
+export function setNativeFullscreenState(
+  window: BaseWindow,
+  nativeFullscreen: boolean,
+): void {
+  const shell = shells.get(window);
+  if (!shell || shell.nativeFullscreen === nativeFullscreen) return;
+  shell.nativeFullscreen = nativeFullscreen;
+  shell.scheduleLayout();
+}
+
+/** Keep page-requested HTML fullscreen separate from app/window fullscreen state. */
+export function setHtmlFullscreenState(
+  window: BaseWindow,
+  htmlFullscreen: boolean,
+): void {
+  const shell = shells.get(window);
+  if (!shell || shell.htmlFullscreen === htmlFullscreen) return;
+  shell.htmlFullscreen = htmlFullscreen;
+  shell.scheduleLayout();
 }
 
 function clearRevealTimer(shell: ShellState): void {
@@ -285,6 +547,9 @@ function applyShellLayout(shell: ShellState): void {
     Math.max(toolbarMetrics.toolbarExtent, toolbarHeight),
     height,
   );
+  const fullscreen = shell.window.isFullScreen();
+  const nativeFullscreen = shell.nativeFullscreen;
+  const pageFullscreen = shell.pageFullscreen || shell.htmlFullscreen;
 
   // Keep the full React renderer alive and correctly sized for New Tab and local panels.
   // When native overlays are active it is hidden, so its full-window bounds cannot steal page input.
@@ -304,38 +569,139 @@ function applyShellLayout(shell: ShellState): void {
     width,
     height: coversPage ? height : toolbarExtent,
   });
-  shellViews.toolbar.setVisible(overlayMode);
+  // Native and page/video fullscreen are content-only. Hide the separate toolbar overlay too, so
+  // it cannot intercept clicks on the page's player controls while its renderer chrome is hidden.
+  // An in-page expanded video (pageFullscreen without window fullscreen) keeps the toolbar: the page
+  // still sits below it, so hiding it would only leave an empty strip.
+  shellViews.toolbar.setVisible(overlayMode && !fullscreen);
 
-  // With the native blur on, the view is cut to the card itself (the blur covers the whole view);
-  // otherwise it is the full-height strip and the CSS insets the card. Either way the card lands on
-  // sidebarCardRect, the same rect the in-page sidebar uses (shared/sidebar-card.ts).
-  const inset = shell.sidebarFrame
-    ? sidebarCardInset(height, {
-        ...SIDEBAR_CARD,
-        inset: shell.sidebarFrame.inset,
+  // The browser frame (Zephium's layout, crates/zephium-core/src/layout.rs): the toolbar strip runs
+  // the full window width and holds the traffic lights; the sidebar, as its rail or its panel,
+  // lives only below the toolbar's bottom line; live pages are a rounded card inset from both by
+  // PAGE_FRAME_GAP. One ground: the window root carries the frame's ground (browserFrameGroundArgb)
+  // and the toolbar strip, rail and docked panel draw none of their own over it, so they are one
+  // continuous surface with no seam in any state; the card's cut-out corners show it too. On macOS
+  // the ground is a translucent tint over the window's 'sidebar' vibrancy (glass, like Zephium);
+  // with Reduce Transparency, in fullscreen and on other platforms it is the opaque surface. The
+  // hover panel is not part of this surface: it floats over the page as its own rounded card
+  // (SIDEBAR_FLOAT), so it never shares an edge with the toolbar. Off while the content renderer
+  // draws everything in-page (New Tab, full panels) and in native fullscreen (no frame).
+  const frameShown = overlayMode && !fullscreen;
+  // Frame transparency 0 is fully solid: the opaque frame and hover card, like Linux.
+  const glass =
+    browserFrameIsGlass({
+      platform: process.platform,
+      reducedTransparency: prefersReducedTransparency(),
+      fullscreen,
+    }) && frameTransparencyAllowsGlass(frameTransparency);
+  const ground = frameShown
+    ? browserFrameGroundArgb({
+        isPrivate: shell.framePrivate,
+        glass,
+        dark: systemUsesDarkColors(),
+        transparency: frameTransparency,
       })
-    : 0;
+    : "#00000000";
+  if (shell.frameGround !== ground) {
+    shell.frameGround = ground;
+    shell.window.contentView.setBackgroundColor(ground);
+  }
+  const frameTop = fullscreen ? 0 : toolbarHeight;
+  const { sidebarMode, sidebarPinned } = shell.chromeState;
+  const docked =
+    frameShown &&
+    sidebarPinned &&
+    (sidebarMode === "tabs" || sidebarMode === "history");
+  // The tab list's hover panel either pushes the page card aside (and is the frame's own material,
+  // like the docked panel) or floats over it as its own card (Settings → Sidebar pushes page off).
+  const pushing =
+    frameShown &&
+    !docked &&
+    sidebarMode === "tabs" &&
+    sidebarPushesPageForMode(sidebarPageMode);
+  const floating = frameShown && !docked && sidebarMode === "tabs" && !pushing;
+  if (
+    shell.sidebarDocked !== docked ||
+    shell.frameGlass !== glass ||
+    shell.sidebarFloating !== floating ||
+    shell.sidebarPushing !== pushing
+  ) {
+    shell.sidebarDocked = docked;
+    shell.frameGlass = glass;
+    shell.sidebarFloating = floating;
+    shell.sidebarPushing = pushing;
+    try {
+      sidebarDockListener?.(shell.window, docked);
+    } catch (error) {
+      console.warn("Sidebar dock listener failed:", error);
+    }
+  }
+
+  // The sidebar content view starts at the toolbar's bottom line; docked chrome is transparent
+  // over the root frame material. A background-only sibling follows this view for temporary hover
+  // blur, without adding a compositor layer to the renderer. Page-card insets stay on page views.
   // The view keeps its card width while closed (slid out and hidden, see sidebar-motion.ts), so a
   // reveal never resizes the sidebar renderer. Never wider than the card may get. During a width
-  // drag it follows the live width too: the view's own background is the native blur/tint, so a
-  // view widened for the drag showed that underlay at full size (the drag keeps its implicit
-  // mouse capture on the sidebar view, so it doesn't need the extra hit-test area).
-  shell.sidebarMotion.layout({
-    y: inset,
-    width: overlaySidebarWidth(shell, width),
-    height: Math.max(0, height - inset * 2),
+  // drag the background-only sibling follows its live bounds; pointer capture stays on the sidebar.
+  // A floating hover card keeps the sidebar width: the view is one float gap wider and the card
+  // stands that gap in from its left edge (the renderer insets it, main insets its glass layer).
+  const sidebarWidth = overlaySidebarWidth(shell, width);
+  const railWidth = sidebarRailWidthForState(width, {
+    nativeFullscreen: fullscreen,
+    pageFullscreen,
   });
-  // Open/close slides along one timeline while live pages stay on screen; entering or leaving
-  // New Tab / a full panel snaps (the in-page sidebar takes over there).
-  const overlayShown = overlayMode && sidebarVisible;
+  const sidebarTop = Math.min(height, frameTop);
+  shell.sidebarMotion.layout({
+    y: sidebarTop,
+    width: sidebarWidth + (floating ? SIDEBAR_FLOAT.gap : 0),
+    height: Math.max(0, height - sidebarTop),
+    railWidth,
+  });
+  // Open/close grows along one timeline while live pages stay on screen; entering or leaving
+  // New Tab / a full panel snaps (the in-page sidebar takes over there). With the tab list the
+  // collapsed view stays as the icon rail, so the sidebar never vanishes completely.
+  // A fullscreen/expanded video takes the whole window: close the sidebar without an animation
+  // and remove its native overlay so it cannot cover or intercept the page's player controls.
+  const overlayShown =
+    overlayMode && sidebarVisible && !pageFullscreen && !nativeFullscreen;
+  const railShown =
+    overlayMode &&
+    shell.chromeState.sidebarMode === "tabs" &&
+    railWidth > 0 &&
+    !nativeFullscreen;
   const animate = shell.lastOverlayMode === overlayMode;
   shell.lastOverlayMode = overlayMode;
-  shell.sidebarMotion.setOpen(overlayShown, { animate });
+  // Live pages start right of the frame's left side: the rail while the sidebar auto-hides (Gmail's
+  // left nav was cut off under it), the panel itself while it is docked. A hover/focus reveal
+  // never changes the frame's rect: it floats over the card, or pushes the card's left edge aside.
+  const frameLeft = pageFrameLeft({
+    overlayMode,
+    fullscreen,
+    sidebarMode,
+    sidebarPinned,
+    sidebarWidth,
+    railWidth,
+  });
+  shell.frameLeft = frameLeft;
   if (overlayShown && !shell.sidebarOverlayShown) {
     shell.sidebarOverlayShown = true;
     emitSidebarOverlay(shell, "shown");
   }
-  shell.syncPageBounds?.(width, height, overlayMode, shell.window);
+  shell.sidebarMotion.setOpen(overlayShown, {
+    animate: animate && !nativeFullscreen && !pageFullscreen,
+    rail: railShown,
+  });
+  syncPageSlide(shell);
+  // Fullscreen is content-only: the page fills the window from its top edge. The content renderer
+  // that measures the page area is hidden over live pages, so it never reports the toolbar going away.
+  shell.syncPageBounds?.(
+    width,
+    height,
+    overlayMode,
+    shell.window,
+    frameLeft,
+    fullscreen,
+  );
   const cause = shell.layoutCause ?? "layout";
   shell.layoutCause = null;
   shell.revealGuard?.noteChromeChanged(cause);
@@ -389,18 +755,34 @@ export function attachBrowserShell(
     scheduleLayout: () => scheduleShellLayout(shell),
     sidebarMotion: null as unknown as SidebarOverlayMotion,
     lastOverlayMode: null,
-    sidebarFrame: null,
     sidebarOverlayShown: false,
+    frameGround: null,
+    framePrivate: false,
+    frameGlass: false,
+    sidebarFloating: false,
+    sidebarPushing: false,
+    frameLeft: null,
+    pageSlide: 0,
+    pageSlideHold: null,
+    sidebarDocked: null,
+    nativeFullscreen: false,
+    htmlFullscreen: false,
     lastActiveTabId: null,
     activeTabSince: 0,
     revealGuard: null,
     layoutCause: null,
+    pageFullscreen: false,
+    pageFullScreenTracker: null as unknown as PageFullScreenTracker,
     dismissOnBlur: () => dismissPopoversOnWindowBlur(shell),
     dismissOnSidebarPress: (_event, mouseEvent) =>
       dismissToolbarPopoversOnPress(shell, "sidebar", mouseEvent.type),
   };
   shell.sidebarMotion = new SidebarOverlayMotion(views.sidebar, {
-    onProgress: (progress) => sidebarMotionListener?.(window, progress),
+    onProgress: (progress, frame) => {
+      // Prepare native background and page bounds before exposing the next sidebar frame.
+      sidebarMotionListener?.(window, progress, frame);
+      syncPageSlide(shell);
+    },
     onHidden: () => {
       if (!shell.sidebarOverlayShown) return;
       shell.sidebarOverlayShown = false;
@@ -409,6 +791,20 @@ export function attachBrowserShell(
     },
   });
   shells.set(window, shell);
+  // Watch the active page for an expanded video (fullscreen API or a video covering the
+  // viewport). When it expands, the sidebar collapses its rail and goes click-through so the
+  // video is fully interactive; when it shrinks back, the rail returns. Only polls while the
+  // sidebar rail is a floating overlay (live pages).
+  shell.pageFullScreenTracker = trackPageFullScreen(
+    views.content.webContents,
+    (expanded) => {
+      if (shell.pageFullscreen === expanded) return;
+      shell.pageFullscreen = expanded;
+      shell.scheduleLayout();
+    },
+    () => shouldUseNativeOverlays(shell),
+  );
+  watchFrameTheme();
   for (const contents of shell.renderers.keys())
     bindContentsToWindow(contents, window);
   for (const event of WINDOW_LAYOUT_EVENTS)
@@ -428,7 +824,7 @@ export function attachBrowserShell(
     patchChrome: (patch, cause) => setBrowserChromeState(patch, window, cause),
     overlayShown: () =>
       shell.sidebarOverlayShown && shouldUseNativeOverlays(shell),
-    sidebarWidth: () => overlaySidebarWidth(shell),
+    sidebarBounds: () => shell.views.sidebar.getBounds(),
   });
 }
 
@@ -463,6 +859,7 @@ export function detachBrowserShell(window?: BaseWindow): void {
     shell.revealGuard = null;
     shell.sidebarMotion.dispose();
     shell.syncPageBounds = null;
+    shell.pageFullScreenTracker.stop();
     for (const contents of shell.renderers.keys())
       retiredRenderers.add(contents);
     shell.renderers.clear();
@@ -1010,7 +1407,7 @@ export function sendToVisibleShellRenderer(
   return true;
 }
 
-/** The overlay sidebar view of a window (sidebar-backdrop.ts paints its background). */
+/** The overlay sidebar content view of a window (its native backdrop, when needed, is a sibling). */
 export function getSidebarOverlayView(
   window: BaseWindow,
 ): WebContentsView | null {
@@ -1021,20 +1418,6 @@ export function getSidebarOverlayView(
 /** True while the overlay sidebar is on screen above a live page in this window. */
 export function isSidebarOverlayShown(window: BaseWindow): boolean {
   return Boolean(shells.get(window)?.sidebarOverlayShown);
-}
-
-/** Inset + round the overlay sidebar view to its card (native blur), or back to the full-height strip (null). */
-export function setSidebarOverlayFrame(
-  window: BaseWindow,
-  frame: { inset: number; radius: number } | null,
-): void {
-  const shell = shells.get(window);
-  if (!shell || shell.window.isDestroyed()) return;
-  const same =
-    shell.sidebarFrame?.inset === frame?.inset &&
-    shell.sidebarFrame?.radius === frame?.radius;
-  shell.sidebarFrame = frame ? { ...frame } : null;
-  if (!same) applyShellLayout(shell);
 }
 
 /** Every browser window with a shell. */

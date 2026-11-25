@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import {
   chmodSync,
   mkdtempSync,
@@ -7,8 +8,9 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import {
   checkGitHubApi,
   createGitHubRelease,
@@ -27,6 +29,44 @@ const config = {
   api: "https://api.github.com",
   uploads: "https://uploads.github.com",
 };
+
+// One adaptive fake curl (scripts/test-setup/fake-github-curl.sh), copied to a temp
+// dir and warmed once at module load, handles all three scenarios in the "release"
+// test (create / reuse-existing / 404) via a state file. bun's spawn cache is
+// per-script, and the first spawnSync("curl") is slow (~2s: it resolves the binary
+// and lazily loads its bash interpreter libraries); priming the exact script here
+// with a trivial call (which hits the `*)` 404 case and never touches the v9
+// release state the test body relies on) means the test body only ever sees
+// already-warmed spawns, keeping it well under bun's hard 5s default even under
+// --parallel=4.
+const releaseDir = mkdtempSync(join(tmpdir(), "fake-curl-release-"));
+const releaseLog = join(releaseDir, "log");
+const fakeCurlPath = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "test-setup",
+  "fake-github-curl.sh",
+);
+writeFileSync(releaseLog, "");
+writeFileSync(join(releaseDir, "curl"), readFileSync(fakeCurlPath));
+chmodSync(join(releaseDir, "curl"), 0o755);
+writeFileSync(join(releaseDir, "S.zip"), "zip");
+{
+  const savedPath = process.env.PATH;
+  const savedFd = process.env.FAKE_RELEASE_DIR;
+  process.env.PATH = `${releaseDir}:${savedPath}`;
+  process.env.FAKE_RELEASE_DIR = releaseDir;
+  try {
+    // Warm the bash interpreter once (the slow first spawn) by running the full
+    // fake-curl script with a trivial call. A trivial call hits the `*)` 404 case,
+    // so it never touches the v9 release state the test body relies on, and the
+    // state file is never created.
+    spawnSync("curl", ["--version"]);
+  } catch {
+    /* ignore */
+  }
+  process.env.PATH = savedPath;
+  process.env.FAKE_RELEASE_DIR = savedFd;
+}
 
 test("config: null without SURFFISH_GH_PROXY (ghp fallback), token preference, missing token throws", () => {
   assert.equal(githubApiConfigFromEnv({ GITHUB_TOKEN: "x" }, "o/r"), null);
@@ -179,19 +219,28 @@ test("dry-run check is read-only GETs through the proxy with auth", () => {
 });
 
 test("release: verify tag -> draft -> upload -> publish", () => {
-  const dir = mkdtempSync(join(tmpdir(), "asset-"));
-  writeFileSync(join(dir, "S.zip"), "zip");
-  withFakeCurl((log) => {
+  const zipPath = join(releaseDir, "S.zip");
+  const snapshot = () => readFileSync(releaseLog, "utf8").trim().split("\n");
+  const savedPath = process.env.PATH;
+  const savedFd = process.env.FAKE_RELEASE_DIR;
+  process.env.PATH = `${releaseDir}:${savedPath}`;
+  // Pin the fake curl's log/state to this dir so its paths are deterministic
+  // regardless of how bun resolves the spawned binary ($0).
+  process.env.FAKE_RELEASE_DIR = releaseDir;
+  try {
+    // Scenario 1: full create -> upload -> publish flow.
+    const before = snapshot();
     const result = createGitHubRelease(config, {
       tag: "v9",
       title: "S v9",
       notes: "n",
-      assetPath: join(dir, "S.zip"),
+      assetPath: zipPath,
     });
+    const createdLog = snapshot().slice(before.length);
     assert.equal(result.url, "https://github.com/o/r/releases/tag/v9");
     assert.deepEqual(result.assets, ["S.zip"]);
     assert.deepEqual(
-      log().map((l) => l.split(" ").slice(0, 2).join(" ")),
+      createdLog.map((l) => l.split(" ").slice(0, 2).join(" ")),
       [
         "GET https://api.github.com/repos/o/r/git/ref/tags/v9",
         "GET https://api.github.com/repos/o/r/releases?per_page=100",
@@ -201,35 +250,37 @@ test("release: verify tag -> draft -> upload -> publish", () => {
         "GET https://api.github.com/repos/o/r/releases/5",
       ],
     );
-  });
-  withFakeCurl(
-    (log) => {
-      createGitHubRelease(config, {
-        tag: "v9",
-        title: "S v9",
-        notes: "n",
-        assetPath: join(dir, "S.zip"),
-      });
-      assert.ok(
-        !log().some((l) =>
-          l.startsWith("POST https://api.github.com/repos/o/r/releases "),
-        ),
-        "reuses the existing draft",
-      );
-    },
-    { existingRelease: true },
-  );
-  withFakeCurl(() => {
+
+    // Scenario 2: an existing draft is reused (no create POST).
+    const beforeReuse = snapshot();
+    createGitHubRelease(config, {
+      tag: "v9",
+      title: "S v9",
+      notes: "n",
+      assetPath: zipPath,
+    });
+    const reusedLog = snapshot().slice(beforeReuse.length);
+    assert.ok(
+      !reusedLog.some((l) =>
+        l.startsWith("POST https://api.github.com/repos/o/r/releases "),
+      ),
+      "reuses the existing draft",
+    );
+
+    // Scenario 3: an unknown tag 404s.
     assert.throws(
       () =>
         createGitHubRelease(config, {
           tag: "v8",
           title: "",
           notes: "",
-          assetPath: join(dir, "S.zip"),
+          assetPath: zipPath,
         }),
       /tag v8 not found.*HTTP 404 Not Found/,
     );
-  });
-  rmSync(dir, { recursive: true, force: true });
+  } finally {
+    process.env.PATH = savedPath;
+    process.env.FAKE_RELEASE_DIR = savedFd;
+    rmSync(releaseDir, { recursive: true, force: true });
+  }
 });

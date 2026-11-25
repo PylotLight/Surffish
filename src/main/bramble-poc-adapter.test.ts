@@ -186,6 +186,28 @@ test("shortens only the picker settle delay and leaves visibility policy unchang
   );
 });
 
+test("shortens the inlined picker settle delay used by Bramble 1.33+", () => {
+  const guard =
+    "var gi=-1/0;function _i(){gi=performance.now()}function vi(){return performance.now()-gi<500}";
+  const adapted = adaptBrambleAutofillSettleDelay(`a();${guard}var P=null;`);
+  assert.equal(
+    adapted,
+    "a();var gi=-1/0;function _i(){gi=performance.now()}function vi(){return performance.now()-gi<100}var P=null;",
+  );
+  assert.throws(
+    () => adaptBrambleAutofillSettleDelay(guard + guard),
+    /unsupported autofill click guard/,
+  );
+  assert.throws(
+    () =>
+      adaptBrambleAutofillSettleDelay(
+        guard +
+          "var oi=500,si=-1/0;function ci(){si=performance.now()}function li(){return performance.now()-si<oi}",
+      ),
+    /unsupported autofill click guard/,
+  );
+});
+
 test("injects the browser alias before Bramble extension-page module scripts, idempotently", () => {
   const original =
     '<!doctype html><html><head><title>Popup</title></head><body><script type="module" src="./popup.js"></script></body></html>';

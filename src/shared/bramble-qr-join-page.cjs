@@ -13,7 +13,7 @@
  * - Optional: "Scan password QR" under the master password field fills it from a plain-text QR. The
  *   value only ever goes into Bramble's own field: never logged, stored or sent anywhere.
  *
- * Pairing code format (flythenimbus/bramble packages/core/src/sync/enrollment.ts): "bramble-pair-1."
+ * Pairing code format (bramble-sh/bramble packages/core/src/sync/enrollment.ts): "bramble-pair-1."
  * followed by base64 of JSON { v: 1, groupKey, inviterPub, psk, relay, iceUrl?, exp? }. The "Add a
  * device" screen encodes exactly that string as the QR (QRCodeSVG value={pairingCode}).
  *

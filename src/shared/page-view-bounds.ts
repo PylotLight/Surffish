@@ -38,3 +38,146 @@ export function initialPageViewBounds(
     height: pageArea.height,
   };
 }
+
+/**
+ * Gap the page card keeps from the browser frame on every side (px): from the sidebar (its rail
+ * or the docked panel) on the left, the toolbar's bottom line on top, and the window's right and
+ * bottom edges. The frame (toolbar strip + sidebar, one material) shows in it, and the card's
+ * rounded corners (PAGE_FRAME_RADIUS, shared/sidebar-card.ts) read as the frame's inner corners,
+ * as Zephium lays its page out (crates/zephium-core/src/layout.rs: padding and gap around content).
+ */
+export const PAGE_FRAME_GAP = 6;
+
+/**
+ * Where the browser frame's left side ends for live pages, in window px: the docked sidebar's
+ * width when the tab list (or history) is pinned open, the collapsed icon rail's width while the
+ * sidebar auto-hides (the rail stays on screen, so the page sits beside it rather than under it),
+ * else 0. A hover/focus reveal never changes it: the panel slides out over the page card. History
+ * opens over the rail like a hover reveal, so it keeps the rail's edge too. null: no frame at all
+ * (New Tab and full panels draw in-page; native fullscreen gives the page the whole window).
+ */
+export function pageFrameLeft({
+  overlayMode,
+  fullscreen,
+  sidebarMode,
+  sidebarPinned,
+  sidebarWidth,
+  railWidth,
+}: {
+  overlayMode: boolean;
+  fullscreen: boolean;
+  sidebarMode: string;
+  sidebarPinned: boolean;
+  sidebarWidth: number;
+  railWidth: number;
+}): number | null {
+  if (!overlayMode || fullscreen) return null;
+  if (sidebarMode !== "tabs" && sidebarMode !== "history") return 0;
+  if (sidebarPinned && sidebarWidth > 0) return Math.round(sidebarWidth);
+  return railWidth > 0 ? Math.round(railWidth) : 0;
+}
+
+/**
+ * The page card inside the frame: `area` (the page area the content renderer measured, its top
+ * on the toolbar's bottom line) starting no further left than the frame's left edge, then inset
+ * by `gap` on every side. `frameLeft` null (no frame) or an empty area leaves `area` as it is.
+ * Not idempotent by design: callers keep the measured area and derive the card from it.
+ */
+export function framePageArea(
+  area: ViewRect,
+  frameLeft: number | null,
+  gap = PAGE_FRAME_GAP,
+): ViewRect {
+  if (frameLeft === null || !(area.width > 0) || !(area.height > 0))
+    return { ...area };
+  const inset = Math.max(0, Math.round(gap));
+  const left = Math.max(area.x, Math.round(frameLeft)) + inset;
+  const top = area.y + inset;
+  const right = area.x + area.width - inset;
+  const bottom = area.y + area.height - inset;
+  return {
+    x: left,
+    y: top,
+    width: Math.max(0, right - left),
+    height: Math.max(0, bottom - top),
+  };
+}
+
+/**
+ * How far the page card's left edge moves right while the tab list's hover panel pushes it aside
+ * (Settings → Appearance → Sidebar pushes page): from the frame's left edge (`frameLeft`, the rail)
+ * to the panel's visible right edge at this point of its open/close slide. 0 when the panel is not
+ * pushing or is closed.
+ */
+export function pageSlideOffset({
+  pushing,
+  panelRight,
+  frameLeft,
+}: {
+  pushing: boolean;
+  panelRight: number;
+  frameLeft: number | null;
+}): number {
+  if (!pushing || frameLeft === null) return 0;
+  return Math.max(0, Math.round(panelRight - frameLeft));
+}
+
+/**
+ * `rect` with its left edge pushed `dx` px right and its right edge kept (the pushed page card):
+ * the page resizes to the room beside the panel instead of sliding under the window's right edge,
+ * so nothing of it is clipped off screen while the panel is open.
+ */
+export function pushViewRect(rect: ViewRect, dx: number): ViewRect {
+  const push = Math.min(Math.max(0, Math.round(dx)), rect.width);
+  return push === 0
+    ? { ...rect }
+    : { ...rect, x: rect.x + push, width: rect.width - push };
+}
+
+/**
+ * Settings → Appearance → Sidebar animation: how the hover panel moves the page it pushes aside.
+ * 'resize' (default): the card's left edge follows the panel and its right edge stays (the page
+ * re-lays out into the room beside it, like Zephium / Arc). 'slide': the card keeps its size and
+ * slides right, the window edge clipping it (no re-layout while it moves).
+ */
+export const SIDEBAR_PUSH_STYLES = ["resize", "slide"] as const;
+export type SidebarPushStyle = (typeof SIDEBAR_PUSH_STYLES)[number];
+export const DEFAULT_SIDEBAR_PUSH_STYLE: SidebarPushStyle = "resize";
+
+export function normalizeSidebarPushStyle(value: unknown): SidebarPushStyle {
+  return (SIDEBAR_PUSH_STYLES as readonly unknown[]).includes(value)
+    ? (value as SidebarPushStyle)
+    : DEFAULT_SIDEBAR_PUSH_STYLE;
+}
+
+/** `rect` moved right by `dx` px, same size (the 'slide' push). */
+export function slideViewRect(rect: ViewRect, dx: number): ViewRect {
+  const slide = Math.max(0, Math.round(dx));
+  return slide === 0 ? { ...rect } : { ...rect, x: rect.x + slide };
+}
+
+/**
+ * The page card pushed `dx` px aside by the hover panel, in `style`.
+ *
+ * `motionWidthPush`: while the panel is moving, the push the open panel rests at. A 'resize' card
+ * then keeps the open width (rect.width - motionWidthPush) and only its x follows the panel, so
+ * the page re-lays out once (as an open starts, as a close lands) instead of every frame, which
+ * Chromium can't keep up with: a stale frame per step reads as jitter. Opening, the card slides in
+ * at its final width and lands with no snap; closing, it slides back and then widens. `null` (at
+ * rest) gives the plain push.
+ */
+export function pushedPageRect(
+  rect: ViewRect,
+  dx: number,
+  style: SidebarPushStyle,
+  motionWidthPush: number | null = null,
+): ViewRect {
+  if (style === "slide") return slideViewRect(rect, dx);
+  if (motionWidthPush === null) return pushViewRect(rect, dx);
+  const push = Math.max(0, Math.round(dx));
+  const hold = Math.min(
+    rect.width,
+    Math.max(push, Math.round(motionWidthPush)),
+  );
+  return { ...rect, x: rect.x + push, width: rect.width - hold };
+}

@@ -389,9 +389,11 @@ async function run() {
     const panel = document.querySelector('.new-tab-customize.is-open')
     if (!panel) return false
     const rect = panel.getBoundingClientRect()
-    return Math.abs(rect.right - innerWidth) <= 1 && rect.left > innerWidth / 2 && getComputedStyle(panel).transform === 'none'
+    // At the New Tab card's right edge (the card is inset from the frame like a page card).
+    const card = document.querySelector('.new-tab-page').getBoundingClientRect()
+    return Math.abs(rect.right - card.right) <= 1 && rect.left > innerWidth / 2 && getComputedStyle(panel).transform === 'none'
   })()`),
-    "the panel slid in at the right edge",
+    "the panel slid in at the New Tab card's right edge",
   );
   assert.equal(
     await ev(

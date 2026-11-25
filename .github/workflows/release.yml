@@ -1,6 +1,7 @@
 name: release
 
-# Manual only: Actions -> release -> Run workflow. Wraps `bun run release` on the self-hosted Mac.
+# Manual only: Actions -> release -> Run workflow. Wraps `bun run release` on the self-hosted Mac,
+# or on GitHub-hosted macos-26 (ARM64) when no self-hosted ARM64 Mac is online (same check as ci.yml).
 # Needs docs/releases/vX.Y.Z.md committed first (the script stops and drafts one if missing).
 on:
   workflow_dispatch:
@@ -28,12 +29,43 @@ concurrency:
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
+  runner_select:
+    name: "Surffish · Release · select mac runner"
+    runs-on: ubuntu-latest
+    outputs:
+      macos: ${{ steps.select.outputs.macos }}
+      hosted: ${{ steps.select.outputs.hosted }}
+    steps:
+      - name: Prefer an online self-hosted ARM64 Mac; otherwise GitHub-hosted macos-26
+        id: select
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! runners="$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runners?per_page=100" --jq '.runners[]? | select(.status == "online") | {labels: [.labels[].name]}' 2>/dev/null)"; then
+            echo "::warning::Could not inspect self-hosted runner status; using GitHub-hosted macos-26"
+            runners=""
+          fi
+          if [ "$(printf '%s\n' "$runners" | jq -s 'any(.[]; (.labels | index("self-hosted")) != null and (.labels | index("macOS")) != null and (.labels | index("ARM64")) != null)')" = true ]; then
+            echo 'macos=["self-hosted","macOS","ARM64"]' >> "$GITHUB_OUTPUT"
+            echo 'hosted=false' >> "$GITHUB_OUTPUT"
+            echo "Release: online self-hosted ARM64 Mac found"
+          else
+            echo 'macos=["macos-26"]' >> "$GITHUB_OUTPUT"
+            echo 'hosted=true' >> "$GITHUB_OUTPUT"
+            echo "::notice::Release: using GitHub-hosted macos-26 ARM64 (no online self-hosted ARM64 Mac)"
+          fi
+
   mac:
     name: "Surffish · Release · mac build · ${{ inputs.from_tag && format('v{0} from tag', inputs.version) || (inputs.version && (startsWith(inputs.version, '0') || startsWith(inputs.version, '1') || startsWith(inputs.version, '2')) && format('v{0}', inputs.version)) || inputs.version || 'patch' }}${{ inputs.resume && ' · resume' || '' }}${{ inputs.dry_run && ' · dry run' || '' }}"
-    runs-on: [self-hosted, macOS, ARM64]
+    needs: runner_select
+    runs-on: ${{ fromJSON(needs.runner_select.outputs.macos) }}
     timeout-minutes: 60
+    env:
+      HOSTED_RUNNER: ${{ needs.runner_select.outputs.hosted }}
     outputs:
       version: ${{ steps.released.outputs.version }}
     steps:
@@ -68,7 +100,11 @@ jobs:
         run: |
           want="$(tr -d ' \nv' < .bun-version)"
           export PATH="$HOME/.bun/bin:$PATH"
-          if [ "$(bun --version 2>/dev/null)" != "$want" ]; then curl -fsSL https://bun.sh/install | bash -s "bun-v$want"; fi
+          # the GitHub release download 504s now and then (fresh hosted runners always download): retry
+          for i in 1 2 3 4 5; do
+            [ "$(bun --version 2>/dev/null)" = "$want" ] && break
+            curl -fsSL https://bun.sh/install | bash -s "bun-v$want" || { echo "bun download failed (try $i), retrying"; sleep $((i * 5)); }
+          done
           echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
           "$HOME/.bun/bin/bun" --version
       - name: Preflight - can this runner push to GitHub? (git push --dry-run, before the build)
@@ -85,7 +121,9 @@ jobs:
         # The Mac's network blocks non-enterprise GitHub API tokens on the direct route. With
         # SURFFISH_GH_PROXY in the runner's .env (e.g. socks5h://127.0.0.1:1080) release.ts makes its
         # REST calls with curl --proxy and the workflow token; otherwise it falls back to fish `ghp`.
+        # GitHub-hosted: no proxy needed, release.ts uses plain gh with the workflow token (SURFFISH_GH=gh).
         run: |
+          if [ "$HOSTED_RUNNER" = "true" ]; then gh --version | head -1; echo "GitHub-hosted runner: release.ts uses plain gh (SURFFISH_GH=gh)"; exit 0; fi
           if [ -n "${SURFFISH_GH_PROXY:-}" ]; then echo "SURFFISH_GH_PROXY present: yes (release.ts checks the API through it)"; exit 0; fi
           echo "SURFFISH_GH_PROXY not set, falling back to fish ghp"
           command -v gh || { echo "::error::set SURFFISH_GH_PROXY in the runner .env, or install gh + fish ghp"; exit 1; }
@@ -99,8 +137,11 @@ jobs:
           FROM_TAG: ${{ inputs.from_tag }}
           # only release.ts's own curl calls use it (named so electron-builder can't pick it up to publish)
           SURFFISH_GH_TOKEN: ${{ github.token }}
+          WORKFLOW_TOKEN: ${{ github.token }}
         run: |
           unset GH_TOKEN GITHUB_TOKEN
+          # hosted: GitHub calls go through plain gh (dist:mac is --publish never, so the token can't leak into a publish)
+          if [ "$HOSTED_RUNNER" = "true" ]; then export SURFFISH_GH=gh GH_TOKEN="$WORKFLOW_TOKEN"; fi
           flags="--yes"
           [ "$DRY_RUN" = "true" ] && flags="$flags --dry-run"
           [ "$RESUME" = "true" ] && flags="$flags --resume"

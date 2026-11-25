@@ -123,6 +123,9 @@ async function run() {
   const toolbar = surface("toolbar");
   const sidebar = surface("sidebar");
   const content = surface("content");
+  // This isolated profile opens on local New Tab; Settings is a full panel, so the visible sidebar
+  // (including its update badge) is rendered in the content WebContents, not the hidden native view.
+  const updateBadgeSurface = content;
   await waitFor(
     () =>
       evaluate(
@@ -157,7 +160,7 @@ async function run() {
   await waitFor(
     () =>
       evaluate(
-        sidebar,
+        updateBadgeSurface,
         'Boolean(document.querySelector(".update-badge-button"))',
       ),
     "the sidebar update badge",
@@ -165,7 +168,7 @@ async function run() {
 
   // --- the badge opens Settings → About & updates
   await evaluate(
-    sidebar,
+    updateBadgeSurface,
     'document.querySelector(".update-badge-button").click()',
   );
   await waitFor(
@@ -196,10 +199,11 @@ async function run() {
       process.env.UPDATES_SMOKE_SCREENSHOT,
       (await content.webContents.capturePage()).toPNG(),
     );
-    writeFileSync(
-      process.env.UPDATES_SMOKE_SCREENSHOT.replace(/\.png$/, "-sidebar.png"),
-      (await sidebar.webContents.capturePage()).toPNG(),
-    );
+    if (sidebar.getVisible())
+      writeFileSync(
+        process.env.UPDATES_SMOKE_SCREENSHOT.replace(/\.png$/, "-sidebar.png"),
+        (await sidebar.webContents.capturePage()).toPNG(),
+      );
   }
 
   // --- remind me later hides the badge, skip persists
@@ -212,7 +216,7 @@ async function run() {
   await waitFor(
     async () =>
       !(await evaluate(
-        sidebar,
+        updateBadgeSurface,
         'Boolean(document.querySelector(".update-badge-button"))',
       )),
     "remind later to hide the badge",

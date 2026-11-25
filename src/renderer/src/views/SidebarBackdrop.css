@@ -1,18 +1,25 @@
 /* Overlay sidebar background over live pages (see shared/sidebar-backdrop.ts).
- * No CSS backdrop-filter here: in the sidebar surface it can only sample its own transparent view
- * (it blurred nothing and cost a full-sidebar blur per repaint, see #68), and on top of the native
- * blur it would double-blur. Each path gets a background that reads on its own. */
-.app-shell[data-surface="sidebar"] .browser-sidebar.has-backdrop-solid,
+ * Native mode paints only in the native view; CSS supplies a flat fallback or snapshot tint, never
+ * an extra glass layer over the native material. */
+/* Solid (Linux, Windows, Sidebar blur off): the floating hover card paints the frame's opaque
+ * surface colour (--frame-surface, BROWSER_FRAME_SURFACE_ARGB). It floats off the toolbar's line
+ * with its own rounded corners (Browser.css, SIDEBAR_FLOAT), so it shares no edge to seam at. */
+.app-shell[data-surface="sidebar"][data-surface]
+  .browser-sidebar.has-backdrop-solid {
+  background: var(--frame-surface, rgb(25, 27, 31));
+}
 .app-shell[data-surface="sidebar"] .browser-sidebar.has-backdrop-snapshot {
   background: linear-gradient(
     160deg,
-    rgba(31, 35, 41, 0.95),
-    rgba(18, 21, 25, 0.96) 45%,
-    rgba(12, 14, 17, 0.97)
+    rgba(48, 58, 72, 0.95),
+    rgba(26, 32, 41, 0.96) 45%,
+    rgba(14, 17, 22, 0.97)
   );
 }
 .app-shell[data-surface="sidebar"]
-  .browser-sidebar.has-backdrop-solid.is-private-window,
+  .browser-sidebar.has-backdrop-solid.is-private-window {
+  background: var(--frame-surface-private, rgb(30, 26, 40));
+}
 .app-shell[data-surface="sidebar"]
   .browser-sidebar.has-backdrop-snapshot.is-private-window {
   background: linear-gradient(
@@ -22,27 +29,9 @@
     rgba(13, 12, 18, 0.97)
   );
 }
-/* Native compositor blur: the view itself is the tinted, blurred, rounded card (main sets it up
- * and insets it by the same --sidebar-card-inset), so the card fills the view instead of insetting
- * itself again, and only adds a faint sheen and its border. */
-.app-shell[data-surface="sidebar"] .browser-sidebar.is-view-framed {
-  top: 0;
-  bottom: 0;
-}
+/* The native compositor supplies both blur and tint; keep the DOM clear, including private windows. */
 .app-shell[data-surface="sidebar"] .browser-sidebar.has-backdrop-native {
-  background: linear-gradient(
-    160deg,
-    rgba(255, 255, 255, 0.06),
-    rgba(255, 255, 255, 0) 40%
-  );
-}
-.app-shell[data-surface="sidebar"]
-  .browser-sidebar.has-backdrop-native.is-private-window {
-  background: linear-gradient(
-    160deg,
-    rgba(150, 110, 255, 0.16),
-    rgba(150, 110, 255, 0.04) 45%
-  );
+  background: transparent;
 }
 
 /* Snapshot: a static, pre-blurred canvas under a darkening tint, behind the sidebar's content. */

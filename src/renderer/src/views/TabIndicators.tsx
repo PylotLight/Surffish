@@ -66,6 +66,7 @@ export function TabFavicon({
         </svg>
       ) : tab.faviconUrl && !iconFailed ? (
         <img
+          draggable={false}
           src={tab.faviconUrl}
           alt=""
           loading="lazy"

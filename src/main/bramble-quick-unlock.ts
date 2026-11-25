@@ -1,7 +1,7 @@
 /**
  * Surffish-only PIN / Touch ID quick unlock for Bramble, layered on the unmodified extension.
  *
- * Bramble upstream will not add a PIN (flythenimbus/bramble#88) and its own Touch ID slot is a
+ * Bramble upstream will not add a PIN (bramble-sh/bramble#88) and its own Touch ID slot is a
  * WebAuthn credential that Electron cannot create. So Surffish keeps the master password itself,
  * encrypted in this process (bramble-quick-unlock-crypto.ts / -vault.ts), and when Bramble's popup
  * shows its master-password unlock form, draws its own PIN pad over the popup. A correct PIN (or

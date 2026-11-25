@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   forgetSessionHistories,
   MAX_RESTORED_WINDOWS,
+  MAX_SAVED_TAB_TITLE,
   normalizeWindowsSession,
   parseWindowsSession,
   serializeWindowsSession,
@@ -45,6 +46,42 @@ describe("window session", () => {
     });
     expect(parsed.windows[1]?.geometry).toBeNull();
     expect(parsed.focusedIndex).toBe(0);
+  });
+
+  test("keeps tab titles through the JSON file, re-pointed past dropped tabs", () => {
+    const session = normalizeWindowsSession(
+      [
+        {
+          urls: ["https://a.test/", "javascript:alert(1)", "https://c.test/"],
+          titles: ["  A page ", "bad", 42],
+          activeIndex: 0,
+          pinnedIndexes: [],
+          geometry: null,
+        },
+        {
+          urls: ["https://d.test/"],
+          titles: ["x".repeat(MAX_SAVED_TAB_TITLE + 50)],
+          activeIndex: 0,
+          pinnedIndexes: [],
+          geometry: null,
+        },
+        {
+          urls: ["https://e.test/"],
+          titles: [""],
+          activeIndex: 0,
+          pinnedIndexes: [],
+          geometry: null,
+        },
+      ],
+      0,
+    );
+    expect(session.windows[0]!.titles).toEqual(["A page", ""]);
+    expect(session.windows[1]!.titles?.[0]).toHaveLength(MAX_SAVED_TAB_TITLE);
+    expect(session.windows[2]!.titles).toBeUndefined();
+    const reread = parseWindowsSession(
+      JSON.parse(JSON.stringify(serializeWindowsSession(session))),
+    );
+    expect(reread.windows[0]!.titles).toEqual(["A page", ""]);
   });
 
   test("older builds still read the focused window from the top-level fields", () => {

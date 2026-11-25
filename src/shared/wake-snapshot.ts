@@ -283,6 +283,7 @@ export function pointInRect(
 export const WAKE_SNAPSHOT_SHOW_CHANNEL = "browser:wake-snapshot:show";
 export const WAKE_SNAPSHOT_FADE_CHANNEL = "browser:wake-snapshot:fade";
 export const WAKE_SNAPSHOT_HIDE_CHANNEL = "browser:wake-snapshot:hide";
+export const WAKE_SNAPSHOT_MOVE_CHANNEL = "browser:wake-snapshot:move";
 export const WAKE_SNAPSHOT_INPUT_CHANNEL = "browser:wake-snapshot:input";
 export const WAKE_SNAPSHOT_FADED_CHANNEL = "browser:wake-snapshot:faded";
 
@@ -291,6 +292,15 @@ export interface WakeSnapshotShowMessage {
   /** data:image/jpeg;base64,… */
   src: string;
   /** Page area in window coordinates (the toolbar surface sits at 0,0). */
+  rect: { x: number; y: number; width: number; height: number };
+}
+
+/**
+ * The page card moved while its picture shows (the tab list's hover panel pushing it aside, or
+ * letting it back): the picture follows, so it never sits under the transparent pushed panel.
+ */
+export interface WakeSnapshotMoveMessage {
+  token: number;
   rect: { x: number; y: number; width: number; height: number };
 }
 

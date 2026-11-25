@@ -498,12 +498,27 @@ async function run() {
       mini.isVisible(),
     "the popout strip",
   );
-  await clickInHeader("#pin");
+  // Pin is setup for the layout checks below; activate it after the popout settles
+  // because Xvfb can drop the synthetic pointer click during this transition.
   await waitFor(
     () =>
       smoke.evaluate(
         header(),
-        'document.getElementById("pin").classList.contains("on")',
+        `(() => {
+          const pin = document.getElementById("pin");
+          const rect = pin.getBoundingClientRect();
+          return !pin.hidden && rect.width > 0 && rect.height > 0;
+        })()`,
+      ),
+    "the pin button to be visible in the popout",
+  );
+  await smoke.evaluate(header(), 'document.getElementById("pin").click()');
+  mini.focus();
+  await waitFor(
+    () =>
+      smoke.evaluate(
+        header(),
+        'document.getElementById("pin").classList.contains("on") && document.getElementById("pin").getAttribute("aria-pressed") === "true"',
       ),
     "pinned (a blur never hides it here)",
   );

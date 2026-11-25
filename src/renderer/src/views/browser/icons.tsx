@@ -37,12 +37,13 @@ export function NewTabSiteIcon({
       style={{ width: iconSize, minHeight: iconSize }}
       type="button"
       onClick={onOpen}
-      title={`Open ${site.title} · ${site.origin}`}
+      title={`Open ${site.title} · ${site.url}`}
       aria-label={`Open ${site.title}, ${hostname}`}
     >
       <span className="new-tab-site-icon" aria-hidden="true">
         {!iconFailed && (
           <img
+            draggable={false}
             src={iconSource}
             alt=""
             loading="lazy"
@@ -71,19 +72,20 @@ export function NewTabSiteIcon({
   );
 }
 
-export function PinnedSiteIcon({
+function pinnedSiteHost(site: PinnedSite): string {
+  const quickLink = toQuickLinkSite(site);
+  return quickLink
+    ? new URL(quickLink.origin).hostname.replace(/^www\./i, "")
+    : historyHost(site.url);
+}
+
+/** A pinned bookmark's mark: its favicon (cached, declared, then /favicon.ico), else its initial. */
+export function PinnedSiteMark({
   site,
   cachedFaviconUrl,
-  onOpen,
-  onUnpin,
-  dragProps,
 }: {
   site: PinnedSite;
   cachedFaviconUrl?: string | null;
-  onOpen: () => void;
-  onUnpin: () => void;
-  dragProps?: React.ButtonHTMLAttributes<HTMLButtonElement> &
-    Record<`data-${string}`, string>;
 }): React.JSX.Element {
   const quickLink = toQuickLinkSite(site);
   const fallbackFaviconUrl = quickLink
@@ -98,9 +100,53 @@ export function PinnedSiteIcon({
     setIconFailed(false);
     setIconSource(preferredFaviconUrl);
   }, [preferredFaviconUrl]);
-  const hostname = quickLink
-    ? new URL(quickLink.origin).hostname.replace(/^www\./i, "")
-    : historyHost(site.url);
+  const hostname = pinnedSiteHost(site);
+  return (
+    <span className="pinned-site-mark" aria-hidden="true">
+      {quickLink && iconSource && !iconFailed && (
+        <img
+          draggable={false}
+          src={iconSource}
+          alt=""
+          loading="lazy"
+          referrerPolicy="no-referrer"
+          onError={() => {
+            const nextSource =
+              iconSource === cachedFaviconUrl
+                ? (site.faviconUrl ?? fallbackFaviconUrl)
+                : fallbackFaviconUrl;
+            if (nextSource && iconSource !== nextSource)
+              setIconSource(nextSource);
+            else setIconFailed(true);
+          }}
+        />
+      )}
+      {(!quickLink || iconFailed) && (
+        <span>
+          {site.title.trim().slice(0, 1).toUpperCase() ||
+            hostname.slice(0, 1).toUpperCase() ||
+            "↗"}
+        </span>
+      )}
+    </span>
+  );
+}
+
+export function PinnedSiteIcon({
+  site,
+  cachedFaviconUrl,
+  onOpen,
+  onUnpin,
+  dragProps,
+}: {
+  site: PinnedSite;
+  cachedFaviconUrl?: string | null;
+  onOpen: () => void;
+  onUnpin: () => void;
+  dragProps?: React.ButtonHTMLAttributes<HTMLButtonElement> &
+    Record<`data-${string}`, string>;
+}): React.JSX.Element {
+  const hostname = pinnedSiteHost(site);
   return (
     <button
       {...dragProps}
@@ -114,32 +160,7 @@ export function PinnedSiteIcon({
         onUnpin();
       }}
     >
-      <span className="pinned-site-mark" aria-hidden="true">
-        {quickLink && iconSource && !iconFailed && (
-          <img
-            src={iconSource}
-            alt=""
-            loading="lazy"
-            referrerPolicy="no-referrer"
-            onError={() => {
-              const nextSource =
-                iconSource === cachedFaviconUrl
-                  ? (site.faviconUrl ?? fallbackFaviconUrl)
-                  : fallbackFaviconUrl;
-              if (nextSource && iconSource !== nextSource)
-                setIconSource(nextSource);
-              else setIconFailed(true);
-            }}
-          />
-        )}
-        {(!quickLink || iconFailed) && (
-          <span>
-            {site.title.trim().slice(0, 1).toUpperCase() ||
-              hostname.slice(0, 1).toUpperCase() ||
-              "↗"}
-          </span>
-        )}
-      </span>
+      <PinnedSiteMark site={site} cachedFaviconUrl={cachedFaviconUrl} />
     </button>
   );
 }
@@ -197,6 +218,7 @@ export function SuggestionFavicon({
     "↗";
   return source ? (
     <img
+      draggable={false}
       src={source}
       alt=""
       referrerPolicy="no-referrer"

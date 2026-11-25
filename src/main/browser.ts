@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { planSetupTabClose } from "../shared/bramble-setup-close";
+import { MAX_SAVED_TAB_TITLE } from "../shared/window-session";
 import {
   capturePageWithin,
   nativeImagePixelSize,
   nativeImagePixelWidthToDip,
 } from "./capture-page";
+import { applyPageViewFrame } from "./page-view-frame";
 import {
   IS_MAC,
   TAB_COMMAND_SHORTCUTS,
@@ -41,6 +43,7 @@ import {
   type WebContents,
   type WebFrameMain,
 } from "electron";
+import { PAGE_FRAME_RADIUS } from "../shared/sidebar-card";
 import type {
   BrowserBounds,
   BrowserFindState,
@@ -215,6 +218,8 @@ import {
   sendToWindowRenderers,
   setBrowserChromeState,
   setBrowserPageIsLocalNewTab,
+  getBrowserSidebarPushStyle,
+  getBrowserSwipeSlidesPage,
 } from "./browser-shell";
 import {
   attachPagePopups,
@@ -252,6 +257,7 @@ import {
   dropPrivateWakeSnapshots,
   dropWakeSnapshot,
   endWakeSnapshot,
+  moveWakeSnapshot,
   endWakeSnapshotForTab,
   hasWakeSnapshot,
   keepWakeSnapshot,
@@ -304,8 +310,10 @@ import {
 } from "./mac-trackpad-swipe";
 import { setPageViewOnScreen, type TabProcessEntry } from "./tab-visibility";
 import {
+  framePageArea,
   initialPageViewBounds,
   pageViewBounds,
+  pushedPageRect,
 } from "../shared/page-view-bounds";
 import { restoredTabInactiveSince } from "./tab-archive-store";
 import type { TabArchiveCandidate } from "../shared/tab-archive";
@@ -477,6 +485,11 @@ interface BrowserTab {
   /** Tab volume 0..1 (tab-volume.ts) and the site it belongs to; follows the tab across windows and sleep. */
   volume: number;
   volumeOrigin: string | null;
+  /**
+   * The page's last title and the URL it was for: what a sleeping or not-yet-loaded tab shows
+   * (instead of its hostname) and what the session saves, so titles survive sleep and restarts.
+   */
+  savedTitle: { url: string; title: string } | null;
 }
 
 interface PdfEditorTabState {
@@ -530,6 +543,22 @@ interface BrowserWindowState {
   activeTabId: string | null;
   /** Page area in window coordinates (where the active site view sits). */
   browserBounds: BrowserBounds;
+  /**
+   * The page area as the content renderer measured it (its viewport), before the frame insets it:
+   * browserBounds is the page card derived from it (shared/page-view-bounds.ts framePageArea).
+   */
+  pageArea?: BrowserBounds;
+  /** Where the browser frame's left side ends for live pages, or null for no frame (pageFrameLeft). */
+  pageFrameLeft?: number | null;
+  /** Window fullscreen over a live page: the page fills the window (browser-shell.ts). */
+  pageFillsWindow?: { width: number; height: number } | null;
+  /**
+   * How far the hover panel pushes the page card's left edge right of `browserBounds` (browser-shell.ts
+   * syncPageSlide): the views shrink from the left, `browserBounds` stays the frame's rect.
+   */
+  pageSlideX?: number;
+  /** While the hover panel moves: the open push a resizing page card holds its width at. */
+  pageSlideHold?: number | null;
   findState: FindState;
   confirmingWindowClose: boolean;
   /** Private window: every new tab in it is private, and it is never saved to the session. */
@@ -729,6 +758,20 @@ function isTabOnScreen(tab: BrowserTab): boolean {
 }
 
 /** Where a tab's page is drawn (window coordinates): its pane in a split on screen, else the page area. */
+/**
+ * Where `tab`'s page card is on screen right now: pageBoundsOf plus the hover panel's push
+ * (pageSlideX). Anything drawn in place of the live page (the wake snapshot) uses this, or it sits
+ * at the unpushed spot under the pushed panel, which has no ground of its own (it is the frame).
+ */
+function onScreenPageBoundsOf(tab: BrowserTab): BrowserBounds {
+  return pushedPageRect(
+    pageBoundsOf(tab),
+    tab.win.pageSlideX ?? 0,
+    getBrowserSidebarPushStyle(),
+    tab.win.pageSlideHold ?? null,
+  );
+}
+
 function pageBoundsOf(tab: BrowserTab): BrowserBounds {
   const w = tab.win;
   const split = splitOf(activeTabOf(w));
@@ -775,12 +818,35 @@ export function shouldPauseBackgroundYouTubeAutoplay(
   const tab = tabForContents(contents);
   return Boolean(tab?.pauseAutoplayUntilVisited && !isTabOnScreen(tab));
 }
+/**
+ * The page's own title: live from its view, else the one kept from before it slept (or from the
+ * last run) while it is still for the same URL; "" when there is none.
+ */
+function liveOrSavedTitle(tab: BrowserTab): string {
+  const contents = tab.view?.webContents;
+  const live =
+    contents && !contents.isDestroyed() ? contents.getTitle().trim() : "";
+  if (live) return live;
+  const saved = tab.savedTitle;
+  return saved && saved.url === currentUrl(tab) ? saved.title : "";
+}
+
+/** What the session keeps as a tab's title ("" for none, Surffish's own pages, PDF editor). */
+function sessionTitle(tab: BrowserTab): string {
+  if (tab.pdfEditor || isSettingsTab(tab)) return "";
+  const url = currentUrl(tab);
+  if (url === SURFFISH_QUICK_LINKS_URL) return "";
+  const title = liveOrSavedTitle(tab);
+  // A page with no <title> reports its URL; that is no better than the hostname fallback.
+  return title && title !== url ? title.slice(0, MAX_SAVED_TAB_TITLE) : "";
+}
+
 function pageTitle(tab: BrowserTab): string {
   if (tab.pdfEditor)
     return pdfEditorTabTitle(tab.pdfEditor.name, tab.pdfEditor.dirty);
   if (currentUrl(tab) === SURFFISH_QUICK_LINKS_URL) return "New Tab";
   if (isSettingsTab(tab)) return SETTINGS_TAB_TITLE;
-  const title = tab.view?.webContents.getTitle().trim();
+  const title = liveOrSavedTitle(tab);
   if (title) return title;
   try {
     return new URL(currentUrl(tab)).hostname || "New tab";
@@ -1263,6 +1329,7 @@ function persistOpenTabs(captureHistoryNow = false): void {
     keptTabs.push(kept);
     return {
       urls: kept.map(currentUrl),
+      titles: kept.map(sessionTitle),
       // Settings active at quit: the tab used before it comes back as the active one.
       activeIndex: sessionActiveIndex(w, kept),
       pinnedIndexes: kept.flatMap((tab, index) => (tab.pinned ? [index] : [])),
@@ -1425,12 +1492,22 @@ export function getBrowserTabPageInfo(id?: string | null): {
 }
 
 function applyTabBounds(w: BrowserWindowState): void {
-  const { browserBounds } = w;
+  // A pushed page card gives up its left side to the hover panel: its right edge stays put.
+  const browserBounds = pushedPageRect(
+    w.browserBounds,
+    w.pageSlideX ?? 0,
+    getBrowserSidebarPushStyle(),
+    w.pageSlideHold ?? null,
+  );
   const pageAreaShown = browserBounds.width > 0 && browserBounds.height > 0;
   // A split on screen: every pane is visible, each in its own rect (split-view.ts does the math).
   const split = splitOf(activeTabOf(w));
   const layout =
     split && pageAreaShown ? splitPaneRects(browserBounds, split.sizes) : null;
+  // Inside the browser frame (toolbar strip + sidebar, browser-shell.ts) the page is a rounded card
+  // (native View.setBorderRadius: real rounded corners, the frame's material shows through the
+  // cut-outs); a split keeps its own surface and square panes.
+  const framed = pageAreaShown && !layout && (w.pageFrameLeft ?? null) !== null;
   for (const tab of w.tabs) {
     if (!tab.view) continue;
     const pane = split ? split.tabIds.indexOf(tab.id) : -1;
@@ -1448,10 +1525,10 @@ function applyTabBounds(w: BrowserWindowState): void {
     // 0x0 (they're detached, which is what throttles them): attaching a 0x0 view and resizing it a
     // moment later showed a frame of stale/empty page on every tab switch (page-view-bounds.ts).
     const target = pageViewBounds(visible && pageAreaShown, bounds);
-    if (target) {
-      tab.view.setBounds(target);
-      reader?.setBounds(target);
-    }
+    const radius = visible && framed ? PAGE_FRAME_RADIUS : 0;
+    // Round before moving the page so its first frame at the new edge is never square.
+    applyPageViewFrame(tab.view, target, radius);
+    if (reader) applyPageViewFrame(reader, target, radius);
     if (!w.window.isDestroyed()) {
       setPageViewOnScreen(
         w.window,
@@ -1787,7 +1864,7 @@ function activateTabInternal(id: string): boolean {
       w.window,
       tab.id,
       tab.view.webContents,
-      pageBoundsOf(tab),
+      onScreenPageBoundsOf(tab),
       wakeUrl,
       tab.isPrivate ? null : partitionForTab(tab),
     );
@@ -2652,6 +2729,8 @@ function createTabView(
   });
   contents.on("page-title-updated", (_event, title) => {
     if (!isCurrentContents()) return;
+    const trimmed = title.trim();
+    if (trimmed) tab.savedTitle = { url: contents.getURL(), title: trimmed };
     if (!tab.isPrivate) updateLatestVisitTitle(contents.getURL(), title);
     publishState(tab.win);
     refreshTabFavicon(tab);
@@ -3998,6 +4077,7 @@ function createTab(
     groupId: null,
     volume: 1,
     volumeOrigin: null,
+    savedTitle: null,
   };
   // Insert in place (e.g. reopening a closed tab) so the renderer never sees an interim order.
   if (insertAt !== undefined && insertAt >= 0 && insertAt < tabs.length)
@@ -4056,6 +4136,8 @@ export interface BrowserWindowInit {
     spaces?: SavedWindowSpaces | null;
     groups?: readonly SavedTabGroup[];
     histories?: ReadonlyArray<SavedTabHistory | null>;
+    /** Each tab's title from the last run ("" for none), same order as `urls`. */
+    titles?: readonly string[];
   };
   /** Move this existing tab (no reload) into the new window instead of opening a New Tab. */
   adoptTabId?: string;
@@ -4159,6 +4241,10 @@ export function attachBrowserView(
       restoredIds.push(id);
       // Keep "last used" across restarts so tab auto-archive counts real idle time, not time since launch.
       const tab = id ? getTab(id) : undefined;
+      // Its title from the last run, so the sidebar shows it before (or without) the page loading.
+      const savedTitle = saved.titles?.[index];
+      if (tab && savedTitle)
+        tab.savedTitle = { url: currentUrl(tab), title: savedTitle };
       if (tab)
         tab.inactiveSince = restoredTabInactiveSince(
           currentUrl(tab),
@@ -4850,7 +4936,11 @@ export function newPrivateBrowserTab(input?: string): string | null {
     false,
     w,
   );
-  if (id && w) setImmediate(() => sendFocusAddressToVisibleRenderer(w.window));
+  if (id && w) {
+    // Publish the new tab before focusing its bar; otherwise the renderer can select the old tab's URL.
+    broadcastQueue.flushNow();
+    setImmediate(() => sendFocusAddressToVisibleRenderer(w.window));
+  }
   return id;
 }
 
@@ -4931,8 +5021,11 @@ export function newBrowserTab(
     persistOpenTabs();
     // Only a blank New Tab wants the address bar. A tab opened on a URL (palette "open in new tab",
     // bookmarks) keeps focus on its page, as in Chrome, so typing and Space reach the site.
-    if (!input?.trim() || input === SURFFISH_QUICK_LINKS_URL)
+    if (!input?.trim() || input === SURFFISH_QUICK_LINKS_URL) {
+      // `createTab` batches state per frame; send it before the focus request to avoid stale URL text.
+      broadcastQueue.flushNow();
       setImmediate(() => sendFocusAddressToVisibleRenderer(w.window));
+    }
   }
   return id;
 }
@@ -6332,16 +6425,72 @@ export function setBrowserBounds(input: unknown): void {
     values.some((value) => typeof value !== "number" || !Number.isFinite(value))
   )
     return;
-  const browserBounds = (w.browserBounds = {
+  // The content renderer measures its viewport (full width, from the toolbar's bottom line); live
+  // pages are the card inside the frame (syncBrowserBoundsToWindow), so its report is framed too.
+  w.pageArea = {
     x: Math.max(0, Math.round(bounds.x!)),
     y: Math.max(0, Math.round(bounds.y!)),
     width: Math.max(0, Math.round(bounds.width!)),
     height: Math.max(0, Math.round(bounds.height!)),
-  });
+  };
+  const fill = w.pageFillsWindow ?? null;
+  const browserBounds = (w.browserBounds =
+    fill && w.pageArea.width > 0 && w.pageArea.height > 0
+      ? { x: 0, y: 0, width: fill.width, height: fill.height }
+      : framePageArea(w.pageArea, w.pageFrameLeft ?? null));
   // Page hidden (New Tab, a full panel): nothing to hover, so drop any status pill left over.
   if (browserBounds.width === 0 || browserBounds.height === 0)
     hideLinkStatus(false, w.window);
   applyTabBounds(w);
+}
+
+/**
+ * The hover panel pushes the page aside (browser-shell.ts): the window's on-screen page card's left
+ * edge moves `dx` px right of its frame rect and its right edge stays, so the page resizes into the
+ * room beside the panel (like Zephium / Arc) rather than sliding under the window's right edge.
+ * While the panel moves, `motionWidthPush` holds a resizing card at its open width so only x
+ * changes per frame (one re-layout per open/close; pushedPageRect). Runs once per motion frame, so
+ * the common case (one page, no split) only moves the active view and its reader; a split goes
+ * through the full
+ * layout so its panes and divider surface move together.
+ */
+export function slideBrowserPage(
+  window: BaseWindow,
+  dx: number,
+  motionWidthPush: number | null = null,
+): void {
+  const w = windowStateFor(window);
+  if (!isLiveWindow(w)) return;
+  const next = Math.max(0, Math.round(dx));
+  const hold = motionWidthPush === null ? null : Math.round(motionWidthPush);
+  if ((w.pageSlideX ?? 0) === next && (w.pageSlideHold ?? null) === hold)
+    return;
+  w.pageSlideX = next;
+  w.pageSlideHold = hold;
+  const { browserBounds } = w;
+  if (!(browserBounds.width > 0) || !(browserBounds.height > 0)) return;
+  const active = activeTabOf(w);
+  if (!active?.view || splitOf(active)) {
+    applyTabBounds(w);
+  } else {
+    const target = pushedPageRect(
+      browserBounds,
+      next,
+      getBrowserSidebarPushStyle(),
+      hold,
+    );
+    const radius = (w.pageFrameLeft ?? null) !== null ? PAGE_FRAME_RADIUS : 0;
+    applyPageViewFrame(active.view, target, radius);
+    const reader = readerViewFor(active.view.webContents);
+    if (reader) applyPageViewFrame(reader, target, radius);
+  }
+  // A waking tab's picture stands in for the page meanwhile: it ends once the card resizes.
+  moveWakeSnapshot(w.window, (tabId) => {
+    const tab = findTab(tabId);
+    return tab && tab.win === w && isTabOnScreen(tab)
+      ? onScreenPageBoundsOf(tab)
+      : null;
+  });
 }
 
 export function syncBrowserBoundsToWindow(
@@ -6349,19 +6498,36 @@ export function syncBrowserBoundsToWindow(
   height: number,
   overlayMode: boolean,
   window?: BaseWindow,
+  frameLeft: number | null = null,
+  contentOnly = false,
 ): void {
   const w = window ? windowStateFor(window) : currentWindowState();
-  if (!isLiveWindow(w) || !overlayMode || width <= 0 || height <= 0) return;
+  if (!isLiveWindow(w)) return;
+  const fill = overlayMode && contentOnly && width > 0 && height > 0;
+  const nextFrame =
+    overlayMode && frameLeft !== null && !fill
+      ? Math.max(0, Math.round(frameLeft))
+      : null;
+  const prevFill = w.pageFillsWindow ?? null;
+  const frameChanged =
+    nextFrame !== (w.pageFrameLeft ?? null) ||
+    fill !== (prevFill !== null) ||
+    (fill && (prevFill?.width !== width || prevFill?.height !== height));
+  w.pageFrameLeft = nextFrame;
+  w.pageFillsWindow = fill ? { width, height } : null;
+  if (!overlayMode || width <= 0 || height <= 0) return;
+  const area = w.pageArea ?? w.browserBounds;
+  if (area.width <= 0 || area.height <= 0) return;
+  // pageArea keeps its top (the toolbar's bottom line) through fullscreen, so leaving it lands the
+  // page back below the toolbar without waiting on the hidden content renderer to measure again.
+  const y = Math.min(area.y, height);
+  w.pageArea = { x: 0, y, width, height: Math.max(0, height - y) };
+  const nextBounds: BrowserBounds = fill
+    ? { x: 0, y: 0, width, height }
+    : framePageArea(w.pageArea, nextFrame);
   const { browserBounds } = w;
-  if (browserBounds.width <= 0 || browserBounds.height <= 0) return;
-  const y = Math.min(browserBounds.y, height);
-  const nextBounds: BrowserBounds = {
-    x: 0,
-    y,
-    width,
-    height: Math.max(0, height - y),
-  };
   if (
+    !frameChanged &&
     nextBounds.x === browserBounds.x &&
     nextBounds.y === browserBounds.y &&
     nextBounds.width === browserBounds.width &&
@@ -6505,7 +6671,10 @@ function beginMacTrackpadSwipe(
       token: ++nextMacTrackpadSwipeToken,
     };
     activeMacTrackpadSwipe = swipe;
-    contents.send(MAC_SWIPE_BEGIN_CHANNEL, { direction: swipe.direction });
+    contents.send(MAC_SWIPE_BEGIN_CHANNEL, {
+      direction: swipe.direction,
+      slide: getBrowserSwipeSlidesPage(),
+    });
     return contents.id;
   } catch (error) {
     console.warn("[trackpad swipe] Could not start page navigation:", error);
@@ -7040,7 +7209,7 @@ function presentRestoredTabPicture(w: BrowserWindowState): void {
     w.window,
     tab.id,
     contents,
-    () => pageBoundsOf(tab),
+    () => onScreenPageBoundsOf(tab),
     currentUrl(tab),
     partitionForTab(tab),
     () => isActiveTab(tab) && tab.view?.webContents === contents,

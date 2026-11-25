@@ -4,8 +4,10 @@ import {
   WAKE_SNAPSHOT_FADED_CHANNEL,
   WAKE_SNAPSHOT_HIDE_CHANNEL,
   WAKE_SNAPSHOT_INPUT_CHANNEL,
+  WAKE_SNAPSHOT_MOVE_CHANNEL,
   WAKE_SNAPSHOT_SHOW_CHANNEL,
   type WakeSnapshotInput,
+  type WakeSnapshotMoveMessage,
   type WakeSnapshotShowMessage,
 } from "../shared/wake-snapshot";
 
@@ -28,6 +30,9 @@ export const wakeSnapshotApi = {
     subscribe(WAKE_SNAPSHOT_FADE_CHANNEL, callback),
   onHide: (callback: (token: number) => void): (() => void) =>
     subscribe(WAKE_SNAPSHOT_HIDE_CHANNEL, callback),
+  onMove: (
+    callback: (message: WakeSnapshotMoveMessage) => void,
+  ): (() => void) => subscribe(WAKE_SNAPSHOT_MOVE_CHANNEL, callback),
   /** Input that landed on the picture: main hands it to the page. */
   input: (token: number, input: WakeSnapshotInput): void =>
     ipcRenderer.send(WAKE_SNAPSHOT_INPUT_CHANNEL, token, input),
