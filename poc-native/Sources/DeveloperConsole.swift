@@ -256,11 +256,18 @@ private final class DeveloperConsoleWindowController: NSWindowController {
         textView.textColor = .textColor
         textView.backgroundColor = NSColor(white: 0.08, alpha: 1)
         textView.textContainerInset = NSSize(width: 10, height: 10)
+        // Diagnostics contain long URLs and query strings. Keep the document
+        // width tied to the viewport and wrap instead of expanding the window.
+        textView.isHorizontallyResizable = false
+        textView.isVerticallyResizable = true
+        textView.autoresizingMask = [.width]
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.lineBreakMode = .byCharWrapping
 
         let scrollView = NSScrollView()
         scrollView.documentView = textView
         scrollView.hasVerticalScroller = true
-        scrollView.hasHorizontalScroller = true
+        scrollView.hasHorizontalScroller = false
         scrollView.autohidesScrollers = true
         scrollView.borderType = .bezelBorder
         scrollView.translatesAutoresizingMaskIntoConstraints = false
