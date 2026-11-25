@@ -313,6 +313,33 @@ public final class WebExtensionManager: NSObject, WKWebExtensionControllerDelega
         return directory
     }
 
+    public func uninstallExtension(id: String) async throws {
+        guard let info = loadedExtensions.first(where: { $0.id == id }) else {
+            throw Self.error("That extension is not currently installed.")
+        }
+
+        try controller.unload(info.context)
+        loadedExtensions.removeAll { $0.id == id }
+        if brambleContext === info.context { brambleContext = nil }
+        onExtensionsChanged?(loadedExtensions)
+
+        let extensionURL = URL(fileURLWithPath: info.path).standardizedFileURL
+        let root = extensionsDirectory().standardizedFileURL
+        let rootPrefix = root.path.hasSuffix("/") ? root.path : root.path + "/"
+        guard extensionURL.path.hasPrefix(rootPrefix) else {
+            // Unpacked development folders are loaded in place; never delete a
+            // directory the user selected outside this profile's Extensions folder.
+            return
+        }
+
+        // Installed packages are stored as one directory per extension. Resolve
+        // the direct child of Extensions rather than deleting an arbitrary path.
+        let relative = String(extensionURL.path.dropFirst(rootPrefix.count))
+        guard let firstComponent = relative.split(separator: "/").first else { return }
+        let installDirectory = root.appendingPathComponent(String(firstComponent), isDirectory: true)
+        try FileManager.default.removeItem(at: installDirectory)
+    }
+
     // Load only extensions explicitly installed into this profile. There is no
     // app-bundle copy and no source-tree fallback.
     public func loadInstalledExtensions() async {
