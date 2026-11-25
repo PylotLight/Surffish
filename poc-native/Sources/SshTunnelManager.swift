@@ -95,7 +95,11 @@ public final class SshTunnelManager {
             stderrText = ""
             pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
                 let data = handle.availableData
-                guard !data.isEmpty, let output = String(data: data, encoding: .utf8) else { return }
+                guard !data.isEmpty else {
+                    handle.readabilityHandler = nil
+                    return
+                }
+                guard let output = String(data: data, encoding: .utf8) else { return }
                 Task { @MainActor [weak self] in
                     guard let self else { return }
                     self.stderrText = String((self.stderrText + output).suffix(4_000))
