@@ -84,8 +84,25 @@ Remove diagnostics and proof-of-concept controls from the normal sidebar and too
 
 ## Current implementation status
 
-- N1 started: versioned atomic session file and stable tab metadata have been introduced.
-- N1 started: normal tabs restore across launches; private tabs are excluded from persistence.
-- N1 started: pinned tabs are ordered before ordinary tabs; basic move, group and Space metadata operations exist.
-- Not yet validated: macOS compilation, WebKit runtime behaviour, restoration after process termination, and private-data isolation.
-- N2–N6 remain outstanding. Do not claim production parity until each phase is implemented and tested.
+### Implemented in this pass
+
+- Added `BrowserSessionStore.swift`: versioned JSON session format, atomic writes and isolated storage under `~/Library/Application Support/SurffishNative/`.
+- Expanded `TabItem` with stable UUID identity, pinned/private state, group ID and Space ID.
+- Added session restore for saved URLs, titles, pin state, group/Space metadata and active tab.
+- Normal tabs use the persistent WebKit default data store; private tabs use `WKWebsiteDataStore.nonPersistent()`.
+- Private tabs are excluded from session serialization.
+- Added pin/unpin ordering and bounded tab movement.
+- Removed the RSS meter, Touch ID demo, extension inventory/installer and AdBlock toggle from the regular sidebar/toolbar.
+- Added a dedicated **Testing** menu for diagnostics, AdBlock test toggle, manual extension installation and Touch ID testing.
+- Preserved the Bramble extension action as a browser toolbar action.
+- Replaced the native PoC README with the actual migration architecture and current status.
+
+### Still required before N1 is complete
+
+- Restore browser window geometry and verify sidebar visibility survives restart and normal tab updates.
+- Restore per-tab back/forward history rather than reloading only the current URL.
+- Add explicit session-store and tab-order tests.
+- Validate that WebKit private browsing never writes site data to the persistent profile.
+- Compile and launch on macOS; the current environment cannot execute AppKit/WebKit.
+
+N2–N6 remain outstanding. Do not claim production parity until each phase is implemented and tested.
