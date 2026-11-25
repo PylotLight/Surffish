@@ -2,6 +2,31 @@ import AppKit
 import QuartzCore
 import WebKit
 
+private final class SurffishBrowserWindow: NSWindow {
+    weak var titlebarBackgroundView: NSView?
+
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .leftMouseDown,
+           event.clickCount == 2,
+           let contentView,
+           let titlebarBackgroundView {
+            let point = contentView.convert(event.locationInWindow, from: nil)
+            let titlebarRect = NSRect(
+                x: contentView.bounds.minX,
+                y: contentView.bounds.maxY - 34,
+                width: contentView.bounds.width,
+                height: 34
+            )
+            if titlebarRect.contains(point),
+               contentView.hitTest(point) === titlebarBackgroundView {
+                zoom(nil)
+                return
+            }
+        }
+        super.sendEvent(event)
+    }
+}
+
 public final class MainWindowController: NSWindowController, NSWindowDelegate, NSPopoverDelegate, OmniboxViewDelegate, SidebarViewDelegate, TabManagerDelegate, WKWebExtensionWindow {
     
     private var omniboxView: OmniboxView!
@@ -20,7 +45,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     private var settingsViewController: BrowserSettingsViewController?
     
     public init() {
-        let window = NSWindow(
+        let window = SurffishBrowserWindow(
             contentRect: NSRect(x: 100, y: 100, width: 1240, height: 820),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
@@ -32,7 +57,6 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
         window.hasShadow = true
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
-        window.titlebarDoubleClickBehavior = .zoom
         window.isMovableByWindowBackground = true
         window.minSize = NSSize(width: 860, height: 540)
         
@@ -89,6 +113,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
         omniboxView.delegate = self
         omniboxView.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(omniboxView)
+        (window as? SurffishBrowserWindow)?.titlebarBackgroundView = omniboxView
         
         // 4. Web Content Container (inset dark rounded card)
         webContainerView = NSView()
