@@ -35,7 +35,7 @@ public final class SshTunnelManager {
         serverEnabled: Bool,
         target: String,
         port: Int,
-        bindAddress: String,
+        bindAddress: String
     ) async {
         self.browserEnabled = browserEnabled
         self.enabled = browserEnabled || serverEnabled
