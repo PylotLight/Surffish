@@ -321,7 +321,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
         
         // Give the extension popup a predictable, roomy viewport. WebKit can
         // otherwise retain a narrow size from the popup's initial layout.
-        let popupSize = NSSize(width: 460, height: 640)
+        let popupSize = NSSize(width: 500, height: 550)
         popupWebView.reload()
         popupWebView.removeFromSuperview()
         popupWebView.translatesAutoresizingMaskIntoConstraints = false
