@@ -136,7 +136,8 @@ public final class TabManager: NSObject, WKNavigationDelegate {
 
     public func restoreSession() {
         guard tabs.isEmpty else { return }
-        guard BrowserSettingsStore.shared.settings.restoreSession,\n              let saved = BrowserSessionStore.shared.load(), !saved.tabs.isEmpty else {
+        guard BrowserSettingsStore.shared.settings.restoreSession,
+              let saved = BrowserSessionStore.shared.load(), !saved.tabs.isEmpty else {
             _ = createTab(url: Self.startPage)
             return
         }
