@@ -20,10 +20,9 @@ public final class SshTunnelManager {
     private var browserEnabled = false
     private var bindAddress = "127.0.0.1"
     private var configuredPort: UInt16 = 1080
-    private var upstreamHost = "127.0.0.1"
-    private var upstreamPort: UInt16 = 1080
     private var generation = 0
     private var reconnectAttempt = 0
+    private var hasReloadedTabsForCurrentConfiguration = false
     private var reconnectTask: Task<Void, Never>?
 
     private let startupTimeout: TimeInterval = 8
@@ -37,8 +36,6 @@ public final class SshTunnelManager {
         target: String,
         port: Int,
         bindAddress: String,
-        upstreamHost: String,
-        upstreamPort: Int
     ) async {
         self.browserEnabled = browserEnabled
         self.enabled = browserEnabled || serverEnabled
@@ -55,32 +52,10 @@ public final class SshTunnelManager {
             updateStatus("SOCKS5 port must be between 1 and 65535 · browser traffic remains blocked")
             return
         }
-        guard (1...65535).contains(upstreamPort), let validUpstreamPort = UInt16(exactly: upstreamPort) else {
-            generation += 1
-            reconnectTask?.cancel()
-            reconnectTask = nil
-            await stopProcess()
-            proxyPort = browserEnabled ? 1 : nil
-            applyProxyToBrowserStores(port: browserEnabled ? 1 : nil)
-            updateStatus("NAS SOCKS5 port must be between 1 and 65535")
-            return
-        }
-        let cleanUpstreamHost = upstreamHost.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard Self.isValidUpstreamHost(cleanUpstreamHost) else {
-            generation += 1
-            reconnectTask?.cancel()
-            reconnectTask = nil
-            await stopProcess()
-            proxyPort = browserEnabled ? 1 : nil
-            applyProxyToBrowserStores(port: browserEnabled ? 1 : nil)
-            updateStatus("Enter a valid NAS SOCKS5 hostname or IP address")
-            return
-        }
-        self.upstreamHost = cleanUpstreamHost
-        self.upstreamPort = validUpstreamPort
         self.configuredPort = validPort
         generation += 1
         reconnectAttempt = 0
+        hasReloadedTabsForCurrentConfiguration = false
         reconnectTask?.cancel()
         reconnectTask = nil
         await stopProcess()
@@ -155,13 +130,11 @@ public final class SshTunnelManager {
             // Install the proxy before launching SSH. If the tunnel fails, WebKit continues
             // pointing at this loopback endpoint and cannot silently fall back to a direct route.
             applyProxyToBrowserStores(port: browserEnabled ? port : nil)
-            if browserEnabled { TabManager.shared.reloadAllTabs() }
-
             let child = Process()
             child.executableURL = executableURL
             child.arguments = (bindAddress == "0.0.0.0" ? ["-g"] : []) + [
                 "-N",
-                "-L", "\(bindAddress):\(port):\(upstreamHost):\(upstreamPort)",
+                "-D", "\(bindAddress):\(port)",
                 "-o", "ExitOnForwardFailure=yes",
                 "-o", "BatchMode=yes",
                 "-o", "ServerAliveInterval=30",
@@ -216,8 +189,11 @@ public final class SshTunnelManager {
                     let listening = await Self.isListening(port: port)
                     if listening {
                         reconnectAttempt = 0
-                        updateStatus("SSH forward ready · \(bindAddress):\(port) → NAS SOCKS5 \(upstreamHost):\(upstreamPort) via \(target)")
-                        if browserEnabled { TabManager.shared.reloadAllTabs() }
+                        updateStatus("SSH SOCKS5 ready · \(bindAddress):\(port) via \(target)")
+                        if browserEnabled && !hasReloadedTabsForCurrentConfiguration {
+                            TabManager.shared.reloadAllTabs()
+                            hasReloadedTabsForCurrentConfiguration = true
+                        }
                         return
                     }
                 }
@@ -288,13 +264,6 @@ public final class SshTunnelManager {
               CharacterSet.alphanumerics.contains(first) else { return false }
         let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._@%+:-[]")
         return value.unicodeScalars.allSatisfy { allowed.contains($0) }
-    }
-
-    private static func isValidUpstreamHost(_ value: String) -> Bool {
-        guard !value.isEmpty, value.utf8.count <= 253 else { return false }
-        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-:")
-        return value.unicodeScalars.allSatisfy { allowed.contains($0) }
-            && !value.hasPrefix(".") && !value.hasSuffix(".")
     }
 
     private static func shouldRetry(_ detail: String) -> Bool {
