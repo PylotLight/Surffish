@@ -226,17 +226,6 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
         return cell
     }
 
-    @objc private func onTabRowClicked(_ gesture: NSClickGestureRecognizer) {
-        let row = tableView.row(at: gesture.location(in: tableView))
-        let tabs = TabManager.shared.tabs
-        if isSettingsTabActive && row == tabs.count {
-            delegate?.sidebarDidOpenSettings()
-            return
-        }
-        guard row >= 0, row < tabs.count else { return }
-        delegate?.sidebarDidSelectTab(id: tabs[row].id)
-    }
-
     @objc private func onPinTabClicked(_ sender: NSButton) {
         let row = sender.tag
         guard row >= 0, row < TabManager.shared.tabs.count else { return }
