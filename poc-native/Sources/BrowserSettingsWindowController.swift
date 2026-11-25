@@ -6,7 +6,9 @@ public final class BrowserSettingsWindowController: NSWindowController {
     private let restoreSession = NSButton(checkboxWithTitle: "Restore tabs from the previous session", target: nil, action: nil)
     private let showSidebar = NSButton(checkboxWithTitle: "Show sidebar at startup", target: nil, action: nil)
     private let sshProxyEnabled = NSButton(checkboxWithTitle: "Route browser traffic through an SSH SOCKS5 proxy", target: nil, action: nil)
-    private let sshHost = NSTextField()
+    private let sshHost = NSComboBox()
+    private let sshHostSearchButton = NSButton(title: "Search SSH configs", target: nil, action: nil)
+    private let sshHostSearchStatus = NSTextField(labelWithString: "")
     private let sshProxyShareEnabled = NSButton(checkboxWithTitle: "Keep the local SOCKS endpoint running when browser routing is off", target: nil, action: nil)
     private let sshProxyPort = NSTextField()
     private let sshProxyBindAddress = NSPopUpButton()
@@ -50,15 +52,27 @@ public final class BrowserSettingsWindowController: NSWindowController {
 
         let connectionHeading = NSTextField(labelWithString: "Connection")
         connectionHeading.font = .systemFont(ofSize: 17, weight: .semibold)
-        sshHost.placeholderString = "SSH config alias or user@host"
-        sshHost.widthAnchor.constraint(equalToConstant: 440).isActive = true
+        sshHost.placeholderString = "Select an SSH host or enter user@host"
+        sshHost.widthAnchor.constraint(equalToConstant: 340).isActive = true
+        sshHostSearchButton.target = self
+        sshHostSearchButton.action = #selector(searchSshHosts)
+        sshHostSearchButton.bezelStyle = .rounded
+        sshHostSearchStatus.textColor = .secondaryLabelColor
+        sshHostSearchStatus.maximumNumberOfLines = 2
         sshProxyPort.placeholderString = "1080"
         sshProxyPort.widthAnchor.constraint(equalToConstant: 110).isActive = true
         sshProxyBindAddress.addItems(withTitles: ["This Mac only (127.0.0.1)", "LAN devices (0.0.0.0)"])
         sshProxyBindAddress.widthAnchor.constraint(equalToConstant: 220).isActive = true
         sshStatus.textColor = .secondaryLabelColor
         sshStatus.maximumNumberOfLines = 3
-        let sshHostRow = makeRow(title: "SSH host", control: sshHost)
+        let sshHostControls = NSStackView(views: [sshHost, sshHostSearchButton])
+        sshHostControls.orientation = .horizontal
+        sshHostControls.alignment = .centerY
+        sshHostControls.spacing = 8
+        let sshHostRow = makeRow(title: "SSH host", control: sshHostControls)
+        let sshHostHint = NSTextField(wrappingLabelWithString: "Search reads Host names from your local ~/.ssh/config (including included config files). Select one to fill this field, or enter an SSH alias or user@host manually. With an SSH alias, the shared port above is used by Surffish and other apps.")
+        sshHostHint.textColor = .secondaryLabelColor
+        sshHostHint.maximumNumberOfLines = 3
         let sshPortRow = makeRow(title: "Local listen port", control: sshProxyPort)
         let sshBindRow = makeRow(title: "Listen address", control: sshProxyBindAddress)
         let proxySharingWarning = NSTextField(wrappingLabelWithString: "Surffish creates a local SOCKS5 proxy and carries browser connections through SSH. Destination traffic exits from the SSH host. LAN sharing exposes the local endpoint without SOCKS authentication; use only on a trusted network.")
@@ -71,7 +85,7 @@ public final class BrowserSettingsWindowController: NSWindowController {
         saveButton.bezelStyle = .rounded
         saveButton.keyEquivalent = "\r"
 
-        let stack = NSStackView(views: [heading, description, searchRow, startRow, restoreSession, showSidebar, connectionHeading, sshProxyEnabled, sshHostRow, sshProxyShareEnabled, sshPortRow, sshBindRow, proxySharingWarning, sshStatus, copyProxyButton, saveButton])
+        let stack = NSStackView(views: [heading, description, searchRow, startRow, restoreSession, showSidebar, connectionHeading, sshProxyEnabled, sshHostRow, sshHostHint, sshHostSearchStatus, sshProxyShareEnabled, sshPortRow, sshBindRow, proxySharingWarning, sshStatus, copyProxyButton, saveButton])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 18
@@ -105,12 +119,38 @@ public final class BrowserSettingsWindowController: NSWindowController {
         showSidebar.state = settings.showSidebarAtStartup ? .on : .off
         sshProxyEnabled.state = settings.sshProxyEnabled ? .on : .off
         sshHost.stringValue = settings.sshHost
+        searchSshHosts()
         sshProxyShareEnabled.state = settings.sshProxyShareEnabled ? .on : .off
         sshProxyPort.stringValue = String(settings.sshProxyPort)
         sshProxyBindAddress.selectItem(at: settings.sshProxyBindAddress == "0.0.0.0" ? 1 : 0)
         sshStatus.stringValue = SshTunnelManager.shared.status
         SshTunnelManager.shared.onStatusChange = { [weak self] status in
             DispatchQueue.main.async { self?.sshStatus.stringValue = status }
+        }
+    }
+
+    @objc private func searchSshHosts() {
+        sshHostSearchButton.isEnabled = false
+        sshHostSearchStatus.stringValue = "Searching your SSH config…"
+        Task { [weak self] in
+            do {
+                let aliases = try SshConfigHostDiscovery.discover()
+                await MainActor.run {
+                    guard let self else { return }
+                    self.sshHost.removeAllItems()
+                    self.sshHost.addItems(withObjectValues: aliases)
+                    self.sshHostSearchStatus.stringValue = aliases.isEmpty
+                        ? "No saved Host aliases found in ~/.ssh/config. You can still enter user@host manually."
+                        : "Found \\(aliases.count) saved SSH \\(aliases.count == 1 ? "host" : "hosts"). Choose one or keep typing manually."
+                    self.sshHostSearchButton.isEnabled = true
+                }
+            } catch {
+                await MainActor.run {
+                    guard let self else { return }
+                    self.sshHostSearchStatus.stringValue = "Could not search SSH config: \\(error.localizedDescription)"
+                    self.sshHostSearchButton.isEnabled = true
+                }
+            }
         }
     }
 
