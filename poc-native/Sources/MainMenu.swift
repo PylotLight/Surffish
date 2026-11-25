@@ -52,6 +52,9 @@ public func setupApplicationMenu() {
     viewMenu.addItem(NSMenuItem(title: "Reload Page", action: #selector(MainWindowController.menuReload), keyEquivalent: "r"))
     viewMenu.addItem(NSMenuItem(title: "Toggle Sidebar", action: #selector(MainWindowController.menuToggleSidebar), keyEquivalent: "\\"))
     viewMenu.addItem(NSMenuItem(title: "Focus Address Bar", action: #selector(MainWindowController.menuFocusAddress), keyEquivalent: "l"))
+    let developerToolsItem = NSMenuItem(title: "Developer Tools", action: #selector(MainWindowController.menuOpenDeveloperTools), keyEquivalent: "i")
+    developerToolsItem.keyEquivalentModifierMask = [.command, .option]
+    viewMenu.addItem(developerToolsItem)
     
     // 5. Testing Menu — development-only hooks are intentionally outside browser chrome.
     let testingMenuItem = NSMenuItem()
