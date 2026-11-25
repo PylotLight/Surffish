@@ -46,21 +46,23 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
         state = .active
         wantsLayer = true
 
-        let tintView = NSView()
-        tintView.wantsLayer = true
-        tintView.layer?.backgroundColor = NSColor(red: 0.08, green: 0.09, blue: 0.11, alpha: 0.24).cgColor
-        tintView.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(tintView)
-
-        workspaceLabel.font = NSFont.systemFont(ofSize: 13, weight: .bold)
-        workspaceLabel.textColor = .labelColor
+        // The shared window glass/tint is drawn once behind this view and the omnibox.
+        // Keeping the sidebar itself transparent avoids a hard vertical seam at the toolbar.
+        workspaceLabel.stringValue = "TABS"
+        workspaceLabel.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+        workspaceLabel.textColor = NSColor(white: 0.95, alpha: 0.62)
         workspaceLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(workspaceLabel)
 
+        newTabButton.title = ""
+        newTabButton.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "New tab")
+        newTabButton.imagePosition = .imageOnly
         newTabButton.bezelStyle = .rounded
+        newTabButton.isBordered = false
+        newTabButton.contentTintColor = .secondaryLabelColor
+        newTabButton.toolTip = "New tab"
         newTabButton.target = self
         newTabButton.action = #selector(onNewTab)
-        newTabButton.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
         newTabButton.translatesAutoresizingMaskIntoConstraints = false
         addSubview(newTabButton)
 
@@ -71,8 +73,8 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
         tableView.backgroundColor = .clear
         tableView.dataSource = self
         tableView.delegate = self
-        tableView.rowHeight = 36
-        tableView.intercellSpacing = NSSize(width: 0, height: 4)
+        tableView.rowHeight = 40
+        tableView.intercellSpacing = NSSize(width: 0, height: 3)
         tableView.selectionHighlightStyle = .none
 
         scrollView.documentView = tableView
@@ -97,16 +99,12 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
         footer.addArrangedSubview(quitButton)
 
         NSLayoutConstraint.activate([
-            tintView.topAnchor.constraint(equalTo: topAnchor),
-            tintView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            tintView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            tintView.bottomAnchor.constraint(equalTo: bottomAnchor),
-
             workspaceLabel.topAnchor.constraint(equalTo: topAnchor, constant: 48),
             workspaceLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 24),
             newTabButton.centerYAnchor.constraint(equalTo: workspaceLabel.centerYAnchor),
             newTabButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
-            newTabButton.widthAnchor.constraint(equalToConstant: 90),
+            newTabButton.widthAnchor.constraint(equalToConstant: 28),
+            newTabButton.heightAnchor.constraint(equalToConstant: 28),
 
             scrollView.topAnchor.constraint(equalTo: workspaceLabel.bottomAnchor, constant: 12),
             scrollView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
