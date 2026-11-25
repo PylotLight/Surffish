@@ -97,7 +97,9 @@ public final class TabManager: NSObject, WKNavigationDelegate {
             // WebKit requires this context-provided configuration for every
             // webkit-extension:// page. The property returns a customized copy.
             configuration = extensionConfiguration
-            configuration.websiteDataStore = WKWebsiteDataStore(forIdentifier: BrowserProfile.current.websiteDataStoreIdentifier)
+            // Keep the extension context's own data store/configuration intact.
+            // WebKit owns extension-origin storage isolation; replacing its
+            // data store can make WKWebView reject the configuration at init.
             BrambleNativeBridge.shared.applyTo(userContentController: configuration.userContentController)
         } else {
             configuration = WKWebViewConfiguration()
