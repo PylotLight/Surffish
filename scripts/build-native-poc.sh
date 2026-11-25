@@ -50,6 +50,8 @@ build_profile_app() {
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
     <string>1.0</string>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Surffish connects to SSH hosts on your local network and can share its SOCKS5 proxy with trusted devices on your LAN.</string>
     <key>LSMinimumSystemVersion</key>
     <string>26.0</string>
     <key>NSHighResolutionCapable</key>
