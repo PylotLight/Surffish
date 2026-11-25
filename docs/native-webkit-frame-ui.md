@@ -37,10 +37,10 @@ Use native WebKit data stores deliberately: the default profile is persistent; p
 ### N1 — Core browser state and persistence
 - Stable tab IDs and production-shaped tab metadata.
 - Pinned tabs stay ahead of ordinary tabs; move and close operations preserve the active tab.
-- Restore tabs and the active tab on launch.
+- Restore tabs and the active tab on launch; persist window preferences separately.
 - Persist only normal tabs; never serialize private-tab URLs or metadata.
 - Atomic, versioned storage under Application Support.
-- Restore the saved start page and sidebar visibility.
+- Restore the configured start page and sidebar visibility preference.
 - Add tests for session parsing, private exclusion, pin ordering and active-tab fallback.
 
 ### N2 — Production tab organization
@@ -92,6 +92,10 @@ Remove diagnostics and proof-of-concept controls from the normal sidebar and too
 - Normal tabs use the persistent WebKit default data store; private tabs use `WKWebsiteDataStore.nonPersistent()`.
 - Private tabs are excluded from session serialization.
 - Added pin/unpin ordering and bounded tab movement.
+- Added a versioned native settings store and a first Settings window with search engine, new-tab page, session restore and sidebar-at-startup preferences.
+- Connected omnibox search routing and new-tab creation to those preferences.
+- Removed automatic loading of local extension test fixtures and removed the machine-specific Bramble fallback path.
+- Disabled the experimental hard-coded AdBlock rules by default.
 - Removed the RSS meter, Touch ID demo, extension inventory/installer and AdBlock toggle from the regular sidebar/toolbar.
 - Added a dedicated **Testing** menu for diagnostics, AdBlock test toggle, manual extension installation and Touch ID testing.
 - Preserved the Bramble extension action as a browser toolbar action.
@@ -99,7 +103,8 @@ Remove diagnostics and proof-of-concept controls from the normal sidebar and too
 
 ### Still required before N1 is complete
 
-- Restore browser window geometry and verify sidebar visibility survives restart and normal tab updates.
+- Restore browser window geometry and verify sidebar visibility survives restart.
+- Expand Settings from the initial Browser preferences to production categories and port their persisted behaviour.
 - Restore per-tab back/forward history rather than reloading only the current URL.
 - Add explicit session-store and tab-order tests.
 - Validate that WebKit private browsing never writes site data to the persistent profile.
