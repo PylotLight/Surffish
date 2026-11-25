@@ -41,6 +41,13 @@ public final class SshTunnelManager {
         self.target = target.trimmingCharacters(in: .whitespacesAndNewlines)
         self.bindAddress = serverEnabled ? bindAddress : "127.0.0.1"
         guard (1...65535).contains(port), let validPort = UInt16(exactly: port) else {
+            generation += 1
+            reconnectTask?.cancel()
+            reconnectTask = nil
+            await stopProcess()
+            proxyPort = nil
+            applyProxyToBrowserStores(port: nil)
+            TabManager.shared.reloadAllTabs()
             updateStatus("SOCKS5 port must be between 1 and 65535")
             return
         }
@@ -240,6 +247,10 @@ public final class SshTunnelManager {
         let message = detail.lowercased()
         let permanentFailures = [
             "host key verification failed",
+            "remote host identification has changed",
+            "no matching host key type found",
+            "no matching key exchange method found",
+            "no matching cipher found",
             "permission denied",
             "bad configuration option",
             "bad owner or permissions",
