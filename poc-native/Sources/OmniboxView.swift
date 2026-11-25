@@ -287,7 +287,7 @@ public final class OmniboxView: NSVisualEffectView, NSTextFieldDelegate {
         zoomButton.setAccessibilityLabel("Page zoom — click to reset to 100%")
         backBtn.isEnabled = tab.webView.canGoBack
         forwardBtn.isEnabled = tab.webView.canGoForward
-        let activeURL = tab.navigationError?.url ?? tab.webView.url ?? tab.url
+        let activeURL = tab.webView.url ?? tab.url
         let isBookmarked = BrowserLibraryStore.shared.isBookmarked(url: activeURL)
         bookmarkBtn.image = NSImage(
             systemSymbolName: isBookmarked ? "bookmark.fill" : "bookmark",
@@ -314,7 +314,7 @@ public final class OmniboxView: NSVisualEffectView, NSTextFieldDelegate {
         )?.withSymbolConfiguration(.init(pointSize: 13, weight: .regular))
         reloadBtn.toolTip = tab.isLoading ? "Stop Loading" : "Reload"
 
-        if let url = activeURL {
+        if let url = tab.url {
             let secure = url.scheme == "https"
             let symbol = secure ? "lock.fill" : (url.scheme == "http" ? "exclamationmark.triangle.fill" : "globe")
             securityIcon.image = NSImage(

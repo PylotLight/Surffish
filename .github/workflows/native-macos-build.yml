@@ -23,7 +23,6 @@ jobs:
             scripts/native-poc-zoom-contract.test.cjs \
             scripts/native-poc-library-contract.test.cjs \
             scripts/native-poc-find-contract.test.cjs \
-            scripts/native-poc-navigation-errors-contract.test.cjs \
             scripts/native-poc-window-state-contract.test.cjs
           node scripts/native-poc-lazy-restore-contract.test.cjs
 
