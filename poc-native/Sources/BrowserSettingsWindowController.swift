@@ -28,7 +28,7 @@ public final class BrowserSettingsViewController: NSViewController {
         buildInterface()
         loadSettings()
         refreshExtensions()
-        WebExtensionManager.shared.onExtensionsChanged = { [weak self] _ in self?.refreshExtensions() }
+        WebExtensionManager.shared.addExtensionsObserver { [weak self] _ in self?.refreshExtensions() }
     }
 
     private func buildInterface() {
