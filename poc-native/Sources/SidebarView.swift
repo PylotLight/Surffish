@@ -9,7 +9,7 @@ public protocol SidebarViewDelegate: AnyObject {
 
 public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTableViewDelegate {
     public weak var delegate: SidebarViewDelegate?
-    private let workspaceLabel = NSTextField(labelWithString: "🐟 Personal Space")
+    private let workspaceLabel = NSTextField(labelWithString: "Tabs")
     private let newTabButton = NSButton(title: "+ New Tab", target: nil, action: nil)
     private let tableView = NSTableView()
     private let scrollView = NSScrollView()
