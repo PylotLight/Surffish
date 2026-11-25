@@ -8,6 +8,7 @@ public protocol OmniboxViewDelegate: AnyObject {
     func omniboxDidClickReload()
     func omniboxDidToggleSidebar()
     func omniboxDidRequestBramblePopup(sender: NSButton)
+    func omniboxDidRequestExtensionManagement()
 }
 
 public final class OmniboxView: NSVisualEffectView, NSTextFieldDelegate {
@@ -84,6 +85,12 @@ public final class OmniboxView: NSVisualEffectView, NSTextFieldDelegate {
         pillContainer.addSubview(progressBar)
 
         configureButton(brambleBtn, title: "🫐", label: "Bramble Password Manager", action: #selector(onBrambleClicked))
+        let extensionMenu = NSMenu()
+        extensionMenu.addItem(withTitle: "Manage Extensions…", action: #selector(onManageExtensions), keyEquivalent: "")
+        extensionMenu.addItem(.separator())
+        extensionMenu.addItem(withTitle: "Open Bramble", action: #selector(onBrambleClicked), keyEquivalent: "")
+        extensionMenu.items.forEach { $0.target = self }
+        brambleBtn.menu = extensionMenu
 
         NSLayoutConstraint.activate([
             sidebarToggleBtn.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
@@ -223,4 +230,5 @@ public final class OmniboxView: NSVisualEffectView, NSTextFieldDelegate {
     @objc private func onForward() { delegate?.omniboxDidClickForward() }
     @objc private func onReload() { delegate?.omniboxDidClickReload() }
     @objc private func onBrambleClicked() { delegate?.omniboxDidRequestBramblePopup(sender: brambleBtn) }
+    @objc private func onManageExtensions() { delegate?.omniboxDidRequestExtensionManagement() }
 }
