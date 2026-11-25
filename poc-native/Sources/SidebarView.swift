@@ -46,7 +46,6 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
     private let pinnedStrip = NSStackView()
     private var pinnedStripHeightConstraint: NSLayoutConstraint!
     private let footer = NSStackView()
-    private let extensionsButton = NSButton()
     private let settingsButton = NSButton()
     private let quitButton = NSButton()
     private var isSettingsTabActive = false
@@ -134,10 +133,8 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
         footer.translatesAutoresizingMaskIntoConstraints = false
         addSubview(footer)
 
-        configureFooterButton(extensionsButton, symbol: "puzzlepiece.extension", title: "Extensions", action: #selector(onExtensions))
         configureFooterButton(settingsButton, symbol: "gearshape", title: "Settings", action: #selector(onSettings))
         configureFooterButton(quitButton, symbol: "power", title: "Quit Surffish", action: #selector(onQuit))
-        footer.addArrangedSubview(extensionsButton)
         footer.addArrangedSubview(settingsButton)
         footer.addArrangedSubview(quitButton)
 
@@ -218,11 +215,11 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
         newTabButton.alignment = collapsed ? .center : .left
         newTabButton.contentTintColor = .secondaryLabelColor
         newTabButton.toolTip = "New tab"
-        for button in [extensionsButton, settingsButton, quitButton] {
-            button.title = collapsed ? "" : (button === extensionsButton ? "Extensions" : button === settingsButton ? "Settings" : "Quit Surffish")
+        for button in [settingsButton, quitButton] {
+            button.title = collapsed ? "" : (button === settingsButton ? "Settings" : "Quit Surffish")
             button.imagePosition = collapsed ? .imageOnly : .imageLeading
             button.alignment = collapsed ? .center : .left
-            button.toolTip = button === extensionsButton ? "Extensions" : button === settingsButton ? "Settings" : "Quit Surffish"
+            button.toolTip = button === settingsButton ? "Settings" : "Quit Surffish"
         }
         footer.alignment = collapsed ? .centerX : .leading
         tableView.reloadData()
@@ -427,7 +424,6 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
         delegate?.sidebarDidSelectTab(id: tabs[sender.tag].id)
     }
     @objc private func onNewTab() { delegate?.sidebarDidCreateNewTab() }
-    @objc private func onExtensions() { delegate?.sidebarDidOpenExtensions() }
     @objc private func onSettings() { delegate?.sidebarDidOpenSettings() }
     @objc private func onQuit() { delegate?.sidebarDidQuit() }
     @objc private func onPinTabClicked(_ sender: NSButton) {
