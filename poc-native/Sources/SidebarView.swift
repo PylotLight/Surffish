@@ -42,6 +42,8 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
     private let newTabButton = NSButton()
     private let tableView = NSTableView()
     private let scrollView = NSScrollView()
+    private let pinnedScrollView = NSScrollView()
+    private let pinnedStrip = NSStackView()
     private let footer = NSStackView()
     private let extensionsButton = NSButton()
     private let settingsButton = NSButton()
@@ -109,6 +111,19 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(scrollView)
 
+        pinnedStrip.orientation = .horizontal
+        pinnedStrip.alignment = .centerY
+        pinnedStrip.distribution = .fill
+        pinnedStrip.spacing = 6
+        pinnedStrip.translatesAutoresizingMaskIntoConstraints = false
+        pinnedScrollView.documentView = pinnedStrip
+        pinnedScrollView.hasHorizontalScroller = false
+        pinnedScrollView.hasVerticalScroller = false
+        pinnedScrollView.drawsBackground = false
+        pinnedScrollView.borderType = .noBorder
+        pinnedScrollView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(pinnedScrollView)
+
         footer.orientation = .vertical
         footer.alignment = .leading
         footer.distribution = .fill
@@ -137,7 +152,12 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
             newTabButton.widthAnchor.constraint(equalToConstant: 30),
             newTabButton.heightAnchor.constraint(equalToConstant: 30),
 
-            scrollView.topAnchor.constraint(equalTo: newTabButton.bottomAnchor, constant: 10),
+            pinnedScrollView.topAnchor.constraint(equalTo: newTabButton.bottomAnchor, constant: 8),
+            pinnedScrollView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            pinnedScrollView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            pinnedScrollView.heightAnchor.constraint(equalToConstant: 38),
+
+            scrollView.topAnchor.constraint(equalTo: pinnedScrollView.bottomAnchor, constant: 6),
             scrollView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
             scrollView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
             scrollView.bottomAnchor.constraint(equalTo: footer.topAnchor, constant: -12),
@@ -205,7 +225,36 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
         needsLayout = true
     }
 
-    public func reloadTabs() { tableView.reloadData() }
+    public func reloadTabs() {
+        tableView.reloadData()
+        reloadPinnedTabs()
+    }
+
+    private func reloadPinnedTabs() {
+        pinnedStrip.arrangedSubviews.forEach { view in
+            pinnedStrip.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+        let pinned = TabManager.shared.tabs.filter(\.isPinned)
+        pinnedScrollView.isHidden = pinned.isEmpty
+        for (index, tab) in pinned.enumerated() {
+            let button = NSButton()
+            button.bezelStyle = .regularSquare
+            button.isBordered = false
+            button.imagePosition = .imageOnly
+            button.imageScaling = .scaleProportionallyDown
+            button.image = NSImage(systemSymbolName: "globe", accessibilityDescription: tab.title)
+            button.toolTip = tab.title.isEmpty ? "Pinned tab" : tab.title
+            button.tag = index
+            button.target = self
+            button.action = #selector(onPinnedTabClicked(_:))
+            button.translatesAutoresizingMaskIntoConstraints = false
+            button.widthAnchor.constraint(equalToConstant: 30).isActive = true
+            button.heightAnchor.constraint(equalToConstant: 30).isActive = true
+            pinnedStrip.addArrangedSubview(button)
+            loadFavicon(for: tab, into: button)
+        }
+    }
 
     public func setSettingsTabActive(_ active: Bool) {
         isSettingsTabActive = active
@@ -214,11 +263,11 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
     }
 
     public func numberOfRows(in tableView: NSTableView) -> Int {
-        TabManager.shared.tabs.count + (isSettingsTabActive ? 1 : 0)
+        TabManager.shared.tabs.filter { !$0.isPinned }.count + (isSettingsTabActive ? 1 : 0)
     }
 
     public func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        let tabs = TabManager.shared.tabs
+        let tabs = TabManager.shared.tabs.filter { !$0.isPinned }
         let cell = SidebarRowView()
         cell.wantsLayer = true
         cell.layer?.cornerRadius = 9
@@ -326,6 +375,19 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
         NSLayoutConstraint.activate(settingsConstraints)
     }
 
+    private func loadFavicon(for tab: TabItem, into button: NSButton) {
+        guard let host = tab.webView.url?.host ?? tab.url?.host,
+              let encodedHost = host.addingPercentEncoding(withAllowedCharacters: .urlHostAllowed),
+              let url = URL(string: "https://www.google.com/s2/favicons?domain=\(encodedHost)&sz=64") else { return }
+        URLSession.shared.dataTask(with: url) { [weak button] data, _, _ in
+            guard let data, let image = NSImage(data: data) else { return }
+            DispatchQueue.main.async {
+                guard let button, button.window != nil else { return }
+                button.image = image
+            }
+        }.resume()
+    }
+
     private func loadFavicon(for tab: TabItem, into imageView: NSImageView) {
         guard let host = tab.webView.url?.host ?? tab.url?.host,
               let encodedHost = host.addingPercentEncoding(withAllowedCharacters: .urlHostAllowed),
@@ -345,18 +407,25 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
     }
 
     @objc private func onCollapse() { delegate?.sidebarDidToggleSidebar() }
+    @objc private func onPinnedTabClicked(_ sender: NSButton) {
+        let tabs = TabManager.shared.tabs.filter(\.isPinned)
+        guard sender.tag >= 0, sender.tag < tabs.count else { return }
+        delegate?.sidebarDidSelectTab(id: tabs[sender.tag].id)
+    }
     @objc private func onNewTab() { delegate?.sidebarDidCreateNewTab() }
     @objc private func onExtensions() { delegate?.sidebarDidOpenExtensions() }
     @objc private func onSettings() { delegate?.sidebarDidOpenSettings() }
     @objc private func onQuit() { delegate?.sidebarDidQuit() }
     @objc private func onPinTabClicked(_ sender: NSButton) {
         let row = sender.tag
-        guard row >= 0, row < TabManager.shared.tabs.count else { return }
-        delegate?.sidebarDidTogglePinTab(id: TabManager.shared.tabs[row].id)
+        let tabs = TabManager.shared.tabs.filter { !$0.isPinned }
+        guard row >= 0, row < tabs.count else { return }
+        delegate?.sidebarDidTogglePinTab(id: tabs[row].id)
     }
     @objc private func onCloseTabClicked(_ sender: NSButton) {
         let row = sender.tag
-        guard row >= 0, row < TabManager.shared.tabs.count else { return }
-        delegate?.sidebarDidCloseTab(id: TabManager.shared.tabs[row].id)
+        let tabs = TabManager.shared.tabs.filter { !$0.isPinned }
+        guard row >= 0, row < tabs.count else { return }
+        delegate?.sidebarDidCloseTab(id: tabs[row].id)
     }
 }
