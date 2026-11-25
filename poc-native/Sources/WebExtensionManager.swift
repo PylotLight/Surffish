@@ -64,7 +64,7 @@ public final class WebExtensionManager: NSObject, WKWebExtensionControllerDelega
     @discardableResult
     public func installBrambleFromFirefoxAddons() async throws -> LoadedExtensionInfo {
         let url = URL(string: "https://addons.mozilla.org/firefox/downloads/latest/\(brambleFirefoxSlug)/latest.xpi")!
-        return try await downloadAndInstall(url: url, installName: "bramble-firefox", archiveType: .zip)
+        return try await downloadAndInstall(url: url, installName: "bramble", archiveType: .zip)
     }
 
     @discardableResult
@@ -76,6 +76,12 @@ public final class WebExtensionManager: NSObject, WKWebExtensionControllerDelega
         let name = ext.displayName ?? directoryURL.lastPathComponent
         let isBramble = name.localizedCaseInsensitiveContains("bramble") ||
             directoryURL.lastPathComponent.localizedCaseInsensitiveContains("bramble")
+        DeveloperConsole.shared.observeExtension(context, name: name)
+
+        if let configuration = context.webViewConfiguration {
+            BrambleNativeBridge.shared.applyTo(userContentController: configuration.userContentController)
+            DeveloperConsole.shared.install(on: configuration.userContentController)
+        }
 
         if isBramble {
             // Keep WebKit's extension origin stable between app launches and updates.
@@ -95,12 +101,19 @@ public final class WebExtensionManager: NSObject, WKWebExtensionControllerDelega
             context.setPermissionStatus(.grantedExplicitly, for: pattern)
         }
 
-        try controller.load(context)
-        try? await context.loadBackgroundContent()
-
-        if let configuration = context.webViewConfiguration {
-            BrambleNativeBridge.shared.applyTo(userContentController: configuration.userContentController)
+        do {
+            try controller.load(context)
+        } catch {
+            DeveloperConsole.shared.record(level: "ERROR", source: "Extension · \(name)", message: "WebKit refused to load extension: \(error.localizedDescription)")
+            throw error
         }
+
+        do {
+            try await context.loadBackgroundContent()
+        } catch {
+            DeveloperConsole.shared.record(level: "ERROR", source: "Extension background · \(name)", message: error.localizedDescription)
+        }
+        DeveloperConsole.shared.captureExtensionErrors(context, name: name)
 
         let info = LoadedExtensionInfo(
             id: isBramble ? "bramble" : (ext.displayName ?? UUID().uuidString),
