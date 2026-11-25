@@ -173,12 +173,19 @@ public final class ExtensionInstallSheet: NSWindowController {
                     guard let self else { return }
                     self.setInstalling(false, message: "Installed and loaded \(info.name) v\(info.version).")
                     self.statusLabel.textColor = .systemGreen
+                    DeveloperConsole.shared.record(level: "INFO", source: "Extension Installer", message: "Installed \(info.name) v\(info.version) from \(info.path)")
                 }
             } catch {
                 await MainActor.run {
                     guard let self else { return }
                     self.setInstalling(false, message: "Install failed: \(error.localizedDescription)")
                     self.statusLabel.textColor = .systemRed
+                    let nsError = error as NSError
+                    DeveloperConsole.shared.record(
+                        level: "ERROR",
+                        source: "Extension Installer",
+                        message: "\(nsError.domain) (\(nsError.code)): \(nsError.localizedDescription)"
+                    )
                 }
             }
         }
