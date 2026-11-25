@@ -1,0 +1,23 @@
+name: Native macOS build
+
+on:
+  push:
+    branches:
+      - poc/native-webkit-app
+    paths:
+      - "poc-native/**"
+      - "scripts/build-native-poc.sh"
+      - ".github/workflows/native-macos-build.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Build native browser
+        run: |
+          chmod +x scripts/build-native-poc.sh
+          ./scripts/build-native-poc.sh
