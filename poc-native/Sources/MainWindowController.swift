@@ -105,7 +105,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
         ])
         
         TabManager.shared.delegate = self
-        let savedSidebarState = BrowserSessionStore.shared.load()?.sidebarVisible ?? BrowserSettingsStore.shared.settings.showSidebarAtStartup
+        let savedSidebarState = BrowserSettingsStore.shared.settings.showSidebarAtStartup
         isSidebarVisible = savedSidebarState
         TabManager.shared.setSidebarVisible(savedSidebarState)
         sidebarLeadingConstraint.constant = savedSidebarState ? 0 : -sidebarWidth
@@ -206,8 +206,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
         } else if trimmed.hasPrefix("localhost:") || trimmed == "localhost" {
             targetUrl = URL(string: "http://" + trimmed)
         } else {
-            let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-            targetUrl = URL(string: "https://duckduckgo.com/?q=\(encoded)")
+            targetUrl = BrowserSettingsStore.shared.settings.searchEngine.searchURL(for: trimmed)
         }
         
         if let url = targetUrl {
