@@ -2,6 +2,7 @@ import AppKit
 import Darwin
 import Network
 
+@MainActor
 public final class SshTunnelManager {
     public static let shared = SshTunnelManager()
 
@@ -120,9 +121,12 @@ public final class SshTunnelManager {
             let deadline = Date().addingTimeInterval(startupTimeout)
             while Date() < deadline {
                 guard runID == generation, enabled else { return }
-                if child.isRunning && await Self.isListening(port: port) {
-                    updateStatus("Connected · 127.0.0.1:\(port)")
-                    return
+                if child.isRunning {
+                    let listening = await Self.isListening(port: port)
+                    if listening {
+                        updateStatus("Connected · 127.0.0.1:\(port)")
+                        return
+                    }
                 }
                 if !child.isRunning {
                     let detail = stderrText
