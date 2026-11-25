@@ -21,12 +21,12 @@ Each profile owns its settings, session, bookmarks/history/database, installed e
 
 Do not implement multiple named upstream proxy profiles. The native MVP has one managed SSH destination and one SOCKS5 endpoint:
 
-- Native OpenSSH manages SSH authentication and the dynamic forward.
-- The SOCKS5 listener has a user-configurable port (default 1080).
+- Native OpenSSH manages SSH authentication and a local TCP forward (`-L`) to the existing NAS SOCKS5 daemon.
+- The local forwarded endpoint has a user-configurable port (default 1080); SOCKS5 itself is served by the NAS daemon.
 - Browser routing and external-client availability are independently selectable.
 - Loopback is the default listener address.
 - Optional LAN binding is explicitly opt-in and carries a no-authentication warning.
-- SOCKS5 clients use remote DNS (for example, `socks5h://127.0.0.1:1080`).
+- SOCKS5 clients speak directly to the NAS daemon through the SSH forward and use remote DNS (for example, `socks5h://127.0.0.1:1080`).
 - One browser-wide managed proxy is the MVP. Later routing may support direct bypass rules and per-site selection between Direct and this one managed endpoint, but not a catalogue of upstream proxies.
 
 ## Current native implementation
@@ -41,10 +41,10 @@ Do not implement multiple named upstream proxy profiles. The native MVP has one 
 - Separate persistent WebKit website data store identifiers for Development and Production.
 - Profile-isolated extension installation directories and Bramble lookup.
 - Profile-specific Bramble Touch ID PRF secrets in Keychain, preventing Development and Production from sharing the same biometric secret.
-- Native OpenSSH dynamic forwarding with launchd SSH-agent discovery, Homebrew PATH support, process monitoring, diagnostics and reconnect backoff.
-- WebKit SOCKSv5 proxy configuration with proxy failover disabled.
+- Native OpenSSH local forwarding (`-L`) to the existing NAS SOCKS5 daemon, with launchd SSH-agent discovery, Homebrew PATH support, process monitoring, diagnostics and reconnect backoff.
+- WebKit SOCKSv5 proxy configuration with proxy failover disabled, pointing to the same local SSH-forwarded NAS SOCKS endpoint used by external applications.
 - Independent browser proxy and external SOCKS service settings.
-- Configurable SOCKS5 port; default 1080.
+- Configurable local listen port and NAS SOCKS host/port; defaults are local 1080 and NAS `127.0.0.1:1080`.
 - Loopback-only listener by default; optional `0.0.0.0` binding when external sharing is enabled.
 - Copyable `socks5h://127.0.0.1:<port>` endpoint.
 - macOS 26 arm64 build workflow.
@@ -52,6 +52,7 @@ Do not implement multiple named upstream proxy profiles. The native MVP has one 
 ### Still required for the native networking MVP
 
 - Verify the managed SSH destination using the same validation rules as Electron's `parseSshTarget`.
+- Verify the NAS SOCKS host/port and confirm the existing NAS service accepts forwarded connections.
 - Add a real connection test and clear UI states for starting, ready, retrying, failed-authentication and port-conflict.
 - Validate configured listener port conflicts without endless retries.
 - Ensure browser traffic stays blocked if the tunnel drops; ensure external clients receive a clear failed connection and never a direct fallback.
@@ -386,7 +387,7 @@ The native browser is MVP-ready when:
 - Production and Development launch independently and never share cookies, sessions, settings or installed extensions.
 - A normal browsing session survives quit/relaunch; private browsing leaves no persistent session/history/site data.
 - Tabs, navigation, pinned tabs, bookmarks, history, downloads and permissions work reliably.
-- A user can enter an SSH alias for the NAS, choose a custom SOCKS5 port, start the tunnel and copy a working `socks5h://` endpoint for other apps.
+- A user can enter an SSH alias for the NAS, configure its existing SOCKS5 host/port, choose a custom local listen port, start the SSH forward and copy a working `socks5h://` endpoint for other apps.
 - Browser routing can be enabled independently from external SOCKS sharing.
 - The endpoint binds to loopback by default; LAN access requires explicit opt-in.
 - Tunnel loss never silently falls back to direct browser traffic.
