@@ -72,6 +72,7 @@ import {
   registerReadAloudIpc,
 } from "./read-aloud-feature";
 import { initializeBrowserSafety } from "./safety";
+import { initializeCloudflareChallengeRewrite } from "./cloudflare-challenge";
 import { initializeCertificateHandling } from "./certificates";
 import {
   disposeUpdates,
@@ -219,6 +220,8 @@ app
       void initializeScreenSharing();
       // Kill switch, HTTPS-only and spellcheck hook into the sessions before ad blocking attaches.
       initializeBrowserSafety();
+      // Cloudflare-only workaround: route dead Turnstile round hosts to the platform host.
+      initializeCloudflareChallengeRewrite();
       // Certificate capture, the macOS OS-trust fallback and "Proceed anyway" exceptions.
       initializeCertificateHandling();
       await initializeSessionCookiePersistence();
