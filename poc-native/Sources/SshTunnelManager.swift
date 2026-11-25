@@ -8,6 +8,7 @@ public final class SshTunnelManager {
 
     public private(set) var status = "Not configured"
     public private(set) var proxyPort: UInt16?
+    public var browserProxyPort: UInt16? { browserEnabled ? proxyPort : nil }
     public var onStatusChange: ((String) -> Void)?
 
     private let executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
