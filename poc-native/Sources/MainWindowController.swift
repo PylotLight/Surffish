@@ -12,7 +12,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     private let sidebarWidth: CGFloat = 320.0
     
     private var bramblePopover: NSPopover?
-    private var installSheet: ExtensionInstallSheet?
+    private var installSheet: ExtensionInstallSheet?\n    private var settingsWindowController: BrowserSettingsWindowController?
     
     public init() {
         let window = NSWindow(
@@ -104,7 +104,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
         ])
         
         TabManager.shared.delegate = self
-        let savedSidebarState = BrowserSessionStore.shared.load()?.sidebarVisible ?? true
+        let savedSidebarState = BrowserSessionStore.shared.load()?.sidebarVisible ?? BrowserSettingsStore.shared.settings.showSidebarAtStartup
         isSidebarVisible = savedSidebarState
         TabManager.shared.setSidebarVisible(savedSidebarState)
         sidebarLeadingConstraint.constant = savedSidebarState ? 0 : -sidebarWidth
@@ -145,7 +145,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     }
     @objc public func menuReload() { omniboxDidClickReload() }
     @objc public func menuToggleSidebar() { omniboxDidToggleSidebar() }
-    @objc public func menuFocusAddress() { omniboxView.focusAddressField() }
+    @objc public func menuFocusAddress() { omniboxView.focusAddressField() }\n    @objc public func menuOpenSettings() {\n        if settingsWindowController == nil { settingsWindowController = BrowserSettingsWindowController() }\n        settingsWindowController?.showWindow(nil)\n        settingsWindowController?.window?.makeKeyAndOrderFront(nil)\n        NSApp.activate(ignoringOtherApps: true)\n    }
     @objc public func menuTestAdBlock() { _ = AdBlockManager.shared.toggle() }
     @objc public func menuTestInstallExtension() { showExtensionInstallSheet() }
     @objc public func menuTestTouchID() { runTouchIDTest() }
