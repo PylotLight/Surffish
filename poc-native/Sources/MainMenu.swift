@@ -9,7 +9,8 @@ public func setupApplicationMenu() {
     let appMenu = NSMenu(title: "Surffish Native")
     appMenuItem.submenu = appMenu
     
-    appMenu.addItem(NSMenuItem(title: "About Surffish Native", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: ""))\n    appMenu.addItem(NSMenuItem(title: "Settings…", action: #selector(MainWindowController.menuOpenSettings), keyEquivalent: ","))
+    appMenu.addItem(NSMenuItem(title: "About Surffish Native", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: ""))
+    appMenu.addItem(NSMenuItem(title: "Settings…", action: #selector(MainWindowController.menuOpenSettings), keyEquivalent: ","))
     appMenu.addItem(NSMenuItem.separator())
     appMenu.addItem(NSMenuItem(title: "Hide Surffish Native", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h"))
     let hideOthers = NSMenuItem(title: "Hide Others", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
