@@ -101,10 +101,18 @@ Remove diagnostics and proof-of-concept controls from the normal sidebar and too
 - Preserved the Bramble extension action as a browser toolbar action.
 - Replaced the native PoC README with the actual migration architecture and current status.
 
+- Added managed OpenSSH dynamic forwarding via `/usr/bin/ssh -N -D` with loopback-only ephemeral port allocation, launchd SSH-agent discovery, Homebrew PATH support, status reporting and reconnect handling.
+- Added native WebKit SOCKSv5 routing using `WKWebsiteDataStore.proxyConfigurations` and `Network.ProxyConfiguration`; applied to normal and private website data stores with proxy failover disabled.
+- Added Connection settings for enabling the SSH route and selecting an SSH config alias or `user@host`.
+- Session restoration now waits until the SSH proxy has been configured, preventing initial page loads from bypassing the selected route.
+
 ### Still required before N1 is complete
 
 - Restore browser window geometry and verify sidebar visibility survives restart.
 - Expand Settings from the initial Browser preferences to production categories and port their persisted behaviour.
+- Add native tests for SSH process lifecycle, local SOCKS readiness, agent discovery, reconnect classification and WebKit proxy configuration.
+- Port production per-site routing, additional SOCKS endpoints, network inspector and the shared external-app SOCKS relay.
+- Validate DNS behaviour, proxy-drop behaviour, wake/sleep recovery and real SSH authentication on macOS.
 - Restore per-tab back/forward history rather than reloading only the current URL.
 - Add explicit session-store and tab-order tests.
 - Validate that WebKit private browsing never writes site data to the persistent profile.
