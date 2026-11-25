@@ -1,0 +1,65 @@
+/scripts/build-native-poc.sh
+==> Building Surffish Native for macOS 26 / Apple Silicon...
+/Users/lochy/repos/Personal/Surffish/poc-native/Sources/BrowserSettingsView.swift:296:24: error: external macro implementation type 'SwiftUIMacros.StateMacro' could not be found for macro 'State()'; plugin for module 'SwiftUIMacros' not found
+294 | public struct BrowserSettingsView: View {
+295 |     @Bindable var model: BrowserSettingsModel
+296 |     @State private var selectedSection: SettingsSection = .general
+    |                        `- error: external macro implementation type 'SwiftUIMacros.StateMacro' could not be found for macro 'State()'; plugin for module 'SwiftUIMacros' not found
+297 |     @State private var settingsSearchQuery = ""
+298 |
+
+SwiftUI.State:1:145: note: 'State()' declared here
+1 | @attached(accessor, names: named(init), named(get), named(set)) @attached(peer, names: prefixed(`_`), prefixed(__), prefixed(`$`)) public macro State() = #externalMacro(module: "SwiftUIMacros", type: "StateMacro")
+  |                                                                                                                                                 `- note: 'State()' declared here
+
+/Users/lochy/repos/Personal/Surffish/poc-native/Sources/BrowserSettingsView.swift:297:24: error: external macro implementation type 'SwiftUIMacros.StateMacro' could not be found for macro 'State()'; plugin for module 'SwiftUIMacros' not found
+295 |     @Bindable var model: BrowserSettingsModel
+296 |     @State private var selectedSection: SettingsSection = .general
+297 |     @State private var settingsSearchQuery = ""
+    |                        `- error: external macro implementation type 'SwiftUIMacros.StateMacro' could not be found for macro 'State()'; plugin for module 'SwiftUIMacros' not found
+298 |
+299 |     public init(model: BrowserSettingsModel) { self.model = model }
+
+SwiftUI.State:1:145: note: 'State()' declared here
+1 | @attached(accessor, names: named(init), named(get), named(set)) @attached(peer, names: prefixed(`_`), prefixed(__), prefixed(`$`)) public macro State() = #externalMacro(module: "SwiftUIMacros", type: "StateMacro")
+  |                                                                                                                                                 `- note: 'State()' declared here
+
+/Users/lochy/repos/Personal/Surffish/poc-native/Sources/BrowserSettingsView.swift:296:24: error: external macro implementation type 'SwiftUIMacros.StateMacro' could not be found for macro 'State()'; plugin for module 'SwiftUIMacros' not found
+294 | public struct BrowserSettingsView: View {
+295 |     @Bindable var model: BrowserSettingsModel
+296 |     @State private var selectedSection: SettingsSection = .general
+    |                        `- error: external macro implementation type 'SwiftUIMacros.StateMacro' could not be found for macro 'State()'; plugin for module 'SwiftUIMacros' not found
+297 |     @State private var settingsSearchQuery = ""
+298 |
+
+SwiftUI.State:1:145: note: 'State()' declared here
+1 | @attached(accessor, names: named(init), named(get), named(set)) @attached(peer, names: prefixed(`_`), prefixed(__), prefixed(`$`)) public macro State() = #externalMacro(module: "SwiftUIMacros", type: "StateMacro")
+  |                                                                                                                                                 `- note: 'State()' declared here
+
+/Users/lochy/repos/Personal/Surffish/poc-native/Sources/BrowserSettingsView.swift:297:24: error: external macro implementation type 'SwiftUIMacros.StateMacro' could not be found for macro 'State()'; plugin for module 'SwiftUIMacros' not found
+295 |     @Bindable var model: BrowserSettingsModel
+296 |     @State private var selectedSection: SettingsSection = .general
+297 |     @State private var settingsSearchQuery = ""
+    |                        `- error: external macro implementation type 'SwiftUIMacros.StateMacro' could not be found for macro 'State()'; plugin for module 'SwiftUIMacros' not found
+298 |
+299 |     public init(model: BrowserSettingsModel) { self.model = model }
+
+SwiftUI.State:1:145: note: 'State()' declared here
+1 | @attached(accessor, names: named(init), named(get), named(set)) @attached(peer, names: prefixed(`_`), prefixed(__), prefixed(`$`)) public macro State() = #externalMacro(module: "SwiftUIMacros", type: "StateMacro")
+  |                                                                                                                                                 `- note: 'State()' declared here
+
+/Users/lochy/repos/Personal/Surffish/poc-native/Sources/BrowserSettingsView.swift:345:56: error: cannot find '$settingsSearchQuery' in scope
+343 |                         .font(.system(size: 11, weight: .medium))
+344 |                         .foregroundStyle(.tertiary)
+345 |                     TextField("Search settings", text: $settingsSearchQuery)
+    |                                                        `- error: cannot find '$settingsSearchQuery' in scope
+346 |                         .textFieldStyle(.plain)
+347 |                         .font(.system(size: 12))
+
+/Users/lochy/repos/Personal/Surffish/poc-native/Sources/BrowserSettingsView.swift:501:25: error: cannot assign to property: 'self' is immutable
+499 |                 ForEach(filteredSearchEntries) { entry in
+500 |                     Button {
+501 |                         selectedSection = entry.section
+    |                         `- error: cannot assign to property: 'self' is immutable
+502 |                         settingsSearchQuery = ""
+503 |                     } label: {
