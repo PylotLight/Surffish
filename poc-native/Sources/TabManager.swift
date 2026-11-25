@@ -62,7 +62,7 @@ public protocol TabManagerDelegate: AnyObject {
 
 public final class TabManager: NSObject, WKNavigationDelegate {
     public static let shared = TabManager()
-    public static let startPage = URL(string: "https://online.bonjourr.fr/")!
+    public static var startPage: URL { BrowserSettingsStore.shared.settings.startPageURL }
 
     public weak var delegate: TabManagerDelegate?
     public private(set) var tabs: [TabItem] = []
@@ -136,7 +136,7 @@ public final class TabManager: NSObject, WKNavigationDelegate {
 
     public func restoreSession() {
         guard tabs.isEmpty else { return }
-        guard let saved = BrowserSessionStore.shared.load(), !saved.tabs.isEmpty else {
+        guard BrowserSettingsStore.shared.settings.restoreSession,\n              let saved = BrowserSessionStore.shared.load(), !saved.tabs.isEmpty else {
             _ = createTab(url: Self.startPage)
             return
         }
