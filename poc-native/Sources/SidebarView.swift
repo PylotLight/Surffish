@@ -44,6 +44,7 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
     private let scrollView = NSScrollView()
     private let pinnedScrollView = NSScrollView()
     private let pinnedStrip = NSStackView()
+    private var pinnedStripHeightConstraint: NSLayoutConstraint!
     private let footer = NSStackView()
     private let extensionsButton = NSButton()
     private let settingsButton = NSButton()
@@ -138,6 +139,7 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
         footer.addArrangedSubview(settingsButton)
         footer.addArrangedSubview(quitButton)
 
+        pinnedStripHeightConstraint = pinnedScrollView.heightAnchor.constraint(equalToConstant: 0)
         NSLayoutConstraint.activate([
             workspaceLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20),
             workspaceLabel.centerYAnchor.constraint(equalTo: collapseButton.centerYAnchor),
@@ -155,7 +157,7 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
             pinnedScrollView.topAnchor.constraint(equalTo: newTabButton.bottomAnchor, constant: 8),
             pinnedScrollView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
             pinnedScrollView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
-            pinnedScrollView.heightAnchor.constraint(equalToConstant: 38),
+            pinnedStripHeightConstraint,
 
             scrollView.topAnchor.constraint(equalTo: pinnedScrollView.bottomAnchor, constant: 6),
             scrollView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
@@ -237,6 +239,7 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
         }
         let pinned = TabManager.shared.tabs.filter(\.isPinned)
         pinnedScrollView.isHidden = pinned.isEmpty
+        pinnedStripHeightConstraint.constant = pinned.isEmpty ? 0 : 38
         for (index, tab) in pinned.enumerated() {
             let button = NSButton()
             button.bezelStyle = .regularSquare
