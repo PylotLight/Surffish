@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 import WebKit
 
 public final class MainWindowController: NSWindowController, NSWindowDelegate, NSPopoverDelegate, OmniboxViewDelegate, SidebarViewDelegate, TabManagerDelegate, WKWebExtensionWindow {
