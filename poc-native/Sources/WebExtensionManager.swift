@@ -204,8 +204,15 @@ public final class WebExtensionManager: NSObject, WKWebExtensionControllerDelega
         if FileManager.default.fileExists(atPath: appSupportBramble.appendingPathComponent("manifest.json").path) {
             brambleUrl = appSupportBramble
         }
-        // 2. Check basePath
-        else if let base = basePath {
+        // 2. Check the app bundle so Finder launches do not depend on the working directory.
+        else if let resourceURL = Bundle.main.resourceURL {
+            let bundled = resourceURL.appendingPathComponent("Bramble", isDirectory: true)
+            if FileManager.default.fileExists(atPath: bundled.appendingPathComponent("manifest.json").path) {
+                brambleUrl = bundled
+            }
+        }
+        // 3. Development source-tree fallback.
+        if brambleUrl == nil, let base = basePath {
             let path = (base as NSString).appendingPathComponent("poc-native/Resources/bramble")
             let u = URL(fileURLWithPath: path)
             if FileManager.default.fileExists(atPath: u.appendingPathComponent("manifest.json").path) {
