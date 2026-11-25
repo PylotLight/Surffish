@@ -45,10 +45,10 @@ public final class SshTunnelManager {
             reconnectTask?.cancel()
             reconnectTask = nil
             await stopProcess()
-            proxyPort = nil
-            applyProxyToBrowserStores(port: nil)
+            proxyPort = browserEnabled ? 1 : nil
+            applyProxyToBrowserStores(port: browserEnabled ? 1 : nil)
             TabManager.shared.reloadAllTabs()
-            updateStatus("SOCKS5 port must be between 1 and 65535")
+            updateStatus("SOCKS5 port must be between 1 and 65535 · browser traffic remains blocked")
             return
         }
         self.configuredPort = validPort
@@ -73,7 +73,9 @@ public final class SshTunnelManager {
             return
         }
         guard ["127.0.0.1", "0.0.0.0"].contains(bindAddress) else {
-            updateStatus("SOCKS5 bind address must be 127.0.0.1 or 0.0.0.0")
+            proxyPort = browserEnabled ? 1 : nil
+            applyProxyToBrowserStores(port: browserEnabled ? 1 : nil)
+            updateStatus("SOCKS5 bind address must be 127.0.0.1 or 0.0.0.0 · browser traffic remains blocked")
             return
         }
 
