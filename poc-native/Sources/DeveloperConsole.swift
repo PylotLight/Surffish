@@ -83,7 +83,8 @@ public final class DeveloperConsole: NSObject, WKScriptMessageHandler {
     public func recordNavigationFailure(url: URL?, error: Error, provisional: Bool) {
         let nsError = error as NSError
         let stage = provisional ? "Navigation / TLS" : "Navigation"
-        let target = url?.absoluteString ?? "(unknown URL)"
+        let failingURL = nsError.userInfo[NSURLErrorFailingURLStringErrorKey] as? String
+        let target = failingURL ?? url?.absoluteString ?? "(unknown URL)"
         record(
             level: "ERROR",
             source: stage,
