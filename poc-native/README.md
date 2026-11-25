@@ -15,8 +15,8 @@ The Electron application on `main` is the behavioural and feature-parity referen
 
 The build creates two independently launchable applications:
 
-- `Surffish Native.app` — Production.
-- `Surffish Native Dev.app` — Development.
+- `Surffish.app` — Production.
+- `Surffish Dev.app` — Development.
 
 Each profile has a separate Application Support directory under:
 
@@ -86,8 +86,8 @@ On macOS 26+ with Xcode command-line tools:
 
 ```bash
 ./scripts/build-native-poc.sh
-open "poc-native/build/Surffish Native.app"
-open "poc-native/build/Surffish Native Dev.app"
+open "poc-native/build/Surffish.app"
+open "poc-native/build/Surffish Dev.app"
 ```
 
 The script compiles the Swift sources against `arm64-apple-macosx26.0` and packages both profile apps, including the Bramble extension resources. GitHub Actions validates the build on a macOS 26 arm64 runner.
