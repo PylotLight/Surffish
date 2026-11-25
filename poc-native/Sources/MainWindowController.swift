@@ -106,6 +106,9 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
         ])
         
         TabManager.shared.delegate = self
+        WebExtensionManager.shared.onExtensionsChanged = { [weak self] _ in
+            DispatchQueue.main.async { self?.omniboxView.refreshExtensionButton() }
+        }
         let savedSidebarState = BrowserSettingsStore.shared.settings.showSidebarAtStartup
         isSidebarVisible = savedSidebarState
         sidebarLeadingConstraint.constant = savedSidebarState ? 0 : -sidebarWidth
@@ -259,6 +262,11 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     }
     
     public func omniboxDidRequestBramblePopup(sender: NSButton) {
+        guard WebExtensionManager.shared.brambleContext != nil else {
+            showExtensionInstallSheet()
+            return
+        }
+
         if let popover = bramblePopover, popover.isShown {
             popover.performClose(nil)
             bramblePopover = nil
@@ -276,8 +284,9 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
         let popover = NSPopover()
         popover.behavior = .transient
         popover.delegate = self
-        // Bramble's native dimensions: 500 x 550
-        popover.contentSize = NSSize(width: 500, height: 550)
+        // Keep the extension popup within the browser window while preserving
+        // the extension's native aspect ratio.
+        popover.contentSize = NSSize(width: 420, height: 560)
         
         let vc = NSViewController()
         vc.view = popupWebView
