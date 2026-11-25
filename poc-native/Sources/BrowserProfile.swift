@@ -15,6 +15,10 @@ public enum BrowserProfile: String, CaseIterable {
            let profile = BrowserProfile(rawValue: value) {
             return profile
         }
+        if let value = Bundle.main.object(forInfoDictionaryKey: "SurffishProfile") as? String,
+           let profile = BrowserProfile(rawValue: value.lowercased()) {
+            return profile
+        }
         return .production
     }()
 
