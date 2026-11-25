@@ -101,12 +101,14 @@ public final class TabManager: NSObject, WKNavigationDelegate {
             // WebKit owns extension-origin storage isolation; replacing its
             // data store can make WKWebView reject the configuration at init.
             BrambleNativeBridge.shared.applyTo(userContentController: configuration.userContentController)
+            DeveloperConsole.shared.install(on: configuration.userContentController)
         } else {
             configuration = WKWebViewConfiguration()
             configuration.websiteDataStore = isPrivate ? .nonPersistent() : WKWebsiteDataStore(forIdentifier: BrowserProfile.current.websiteDataStoreIdentifier)
             configuration.webExtensionController = WebExtensionManager.shared.controller
             AdBlockManager.shared.applyTo(userContentController: configuration.userContentController)
             BrambleNativeBridge.shared.applyTo(userContentController: configuration.userContentController)
+            DeveloperConsole.shared.install(on: configuration.userContentController)
         }
 
         WebKitProxyController.apply(port: SshTunnelManager.shared.browserProxyPort, to: configuration.websiteDataStore)
@@ -296,12 +298,14 @@ public final class TabManager: NSObject, WKNavigationDelegate {
 
     public func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         guard let tab = tabs.first(where: { $0.webView === webView }) else { return }
+        DeveloperConsole.shared.recordNavigationFailure(url: webView.url ?? tab.url, error: error, provisional: false)
         tab.isLoading = false
         notifyTabsChanged()
     }
 
     public func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         guard let tab = tabs.first(where: { $0.webView === webView }) else { return }
+        DeveloperConsole.shared.recordNavigationFailure(url: webView.url ?? tab.url, error: error, provisional: true)
         tab.isLoading = false
         notifyTabsChanged()
     }
