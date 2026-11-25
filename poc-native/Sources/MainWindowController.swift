@@ -148,16 +148,19 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
             
             // Omnibox starts to right of sidebar and extends across top
             omniboxView.topAnchor.constraint(equalTo: contentView.topAnchor),
-            omniboxView.leadingAnchor.constraint(equalTo: sidebarView.trailingAnchor),
+            omniboxView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: collapsedSidebarWidth),
             omniboxView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             omniboxView.heightAnchor.constraint(equalToConstant: 50),
             
             // Web view container sits below Omnibox
-            webContainerView.leadingAnchor.constraint(equalTo: sidebarView.trailingAnchor, constant: 8),
+            webContainerView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: collapsedSidebarWidth + 8),
             webContainerView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -8),
             webContainerView.topAnchor.constraint(equalTo: omniboxView.bottomAnchor, constant: 8),
             webContainerView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -8),
         ])
+        // The sidebar is an overlay: keep the browser viewport fixed at the rail edge
+        // and let the expanded panel float above the page instead of pushing it sideways.
+        contentView.addSubview(sidebarView, positioned: .above, relativeTo: nil)
         
         TabManager.shared.delegate = self
         WebExtensionManager.shared.onExtensionsChanged = { [weak self] _ in
