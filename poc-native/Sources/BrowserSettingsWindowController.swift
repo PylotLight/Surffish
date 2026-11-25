@@ -134,22 +134,20 @@ public final class BrowserSettingsWindowController: NSWindowController {
         sshHostSearchStatus.stringValue = "Searching your SSH config…"
         Task { [weak self] in
             do {
-                let aliases = try SshConfigHostDiscovery.discover()
-                await MainActor.run {
-                    guard let self else { return }
-                    self.sshHost.removeAllItems()
-                    self.sshHost.addItems(withObjectValues: aliases)
-                    self.sshHostSearchStatus.stringValue = aliases.isEmpty
-                        ? "No saved Host aliases found in ~/.ssh/config. You can still enter user@host manually."
-                        : "Found \\(aliases.count) saved SSH \\(aliases.count == 1 ? "host" : "hosts"). Choose one or keep typing manually."
-                    self.sshHostSearchButton.isEnabled = true
-                }
+                let aliases = try await Task.detached {
+                    try SshConfigHostDiscovery.discover()
+                }.value
+                guard let self else { return }
+                self.sshHost.removeAllItems()
+                self.sshHost.addItems(withObjectValues: aliases)
+                self.sshHostSearchStatus.stringValue = aliases.isEmpty
+                    ? "No saved Host aliases found in ~/.ssh/config. You can still enter user@host manually."
+                    : "Found \\(aliases.count) saved SSH \\(aliases.count == 1 ? "host" : "hosts"). Choose one or keep typing manually."
+                self.sshHostSearchButton.isEnabled = true
             } catch {
-                await MainActor.run {
-                    guard let self else { return }
-                    self.sshHostSearchStatus.stringValue = "Could not search SSH config: \\(error.localizedDescription)"
-                    self.sshHostSearchButton.isEnabled = true
-                }
+                guard let self else { return }
+                self.sshHostSearchStatus.stringValue = "Could not search SSH config: \\(error.localizedDescription)"
+                self.sshHostSearchButton.isEnabled = true
             }
         }
     }
