@@ -51,6 +51,7 @@ public final class AdBlockManager {
         }
     }
     
+    @MainActor
     public func toggle() -> Bool {
         isEnabled.toggle()
         guard let list = ruleList else { return isEnabled }
