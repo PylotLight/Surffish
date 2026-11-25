@@ -135,13 +135,15 @@ final class BrambleNativeMessagingConnection {
 
                 do {
                     let message = try JSONSerialization.jsonObject(with: body, options: [.fragmentsAllowed])
-                    Task { @MainActor in
-                        guard !self.isClosed else { return }
-                        self.port.sendMessage(message) { [weak self] sendError in
-                            guard let sendError else { return }
-                            Task { @MainActor in self?.fail(sendError) }
+                    Task { @MainActor [weak self] in
+                        guard let self, !self.isClosed else { return }
+                        do {
+                            try await self.port.sendMessage(message)
+                            guard !self.isClosed else { return }
+                            self.receiveNextFrame()
+                        } catch {
+                            self.fail(error)
                         }
-                        self.receiveNextFrame()
                     }
                 } catch {
                     Task { @MainActor in self.fail(error) }
