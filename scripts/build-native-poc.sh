@@ -31,9 +31,7 @@ build_profile_app() {
     rm -rf "${app_dir}"
     mkdir -p "${macos_dir}" "${resources_dir}"
     cp "${BINARY}" "${macos_dir}/Surffish"
-    if [ -d "${ROOT_DIR}/poc-native/Resources/bramble" ]; then
-        cp -R "${ROOT_DIR}/poc-native/Resources/bramble" "${resources_dir}/Bramble"
-    fi
+    # Browser extensions are installed per profile at runtime; never bundle upstream extension code.
 
     cat > "${app_dir}/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
