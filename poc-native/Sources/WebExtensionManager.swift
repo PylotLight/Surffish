@@ -81,10 +81,12 @@ public final class WebExtensionManager: NSObject, WKWebExtensionControllerDelega
         }
         let granted = allowed ? [nativeMessaging] : []
         completionHandler(Set(granted), nil)
+        let decision = allowed ? "Granted" : "Denied"
+        let extensionName = extensionContext.webExtension.displayName ?? "extension"
         DeveloperConsole.shared.record(
             level: allowed ? "INFO" : "WARN",
             source: "Extension Permissions",
-            message: "\(allowed ? \"Granted\" : \"Denied\") nativeMessaging for \(extensionContext.webExtension.displayName ?? \"extension\")"
+            message: "\(decision) nativeMessaging for \(extensionName)"
         )
     }
 
