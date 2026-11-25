@@ -139,7 +139,7 @@ public final class SshTunnelManager {
             let child = Process()
             child.executableURL = executableURL
             child.arguments = (bindAddress == "0.0.0.0" ? ["-g"] : []) + [
-                "-vv",
+                "-vvv",
                 "-N",
                 "-D", "\(bindAddress):\(port)",
                 "-o", "ExitOnForwardFailure=yes",
