@@ -58,4 +58,4 @@ On macOS 15.4 or later with Xcode command-line tools installed:
 open poc-native/build/SurffishNative.app
 ```
 
-The build script compiles all Swift sources in `poc-native/Sources`. This repository environment cannot compile AppKit/WebKit; the native build and runtime checks must be performed on macOS.
+The build script compiles all Swift sources in `poc-native/Sources`. A GitHub Actions macOS 15 arm64 build now validates compilation on every native-branch change. Runtime checks against a real SSH host, Keychain/agent, sleep/wake and WebKit traffic still need to be performed on a developer Mac.
