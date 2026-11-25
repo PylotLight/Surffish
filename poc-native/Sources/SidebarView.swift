@@ -157,8 +157,8 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
             newTabButton.heightAnchor.constraint(equalToConstant: 30),
 
             pinnedScrollView.topAnchor.constraint(equalTo: newTabButton.bottomAnchor, constant: 8),
-            pinnedScrollView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
-            pinnedScrollView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            pinnedScrollView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
+            pinnedScrollView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
             pinnedStripHeightConstraint,
 
             scrollView.topAnchor.constraint(equalTo: pinnedScrollView.bottomAnchor, constant: 6),
@@ -242,7 +242,8 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
         let pinned = TabManager.shared.tabs.filter(\.isPinned)
         pinnedScrollView.isHidden = pinned.isEmpty
         pinnedStripHeightConstraint.constant = pinned.isEmpty ? 0 : 38
-        for (index, tab) in pinned.enumerated() {
+        let displayed = isCollapsed ? Array(pinned.prefix(1)) : pinned
+        for (index, tab) in displayed.enumerated() {
             let button = NSButton()
             button.bezelStyle = .regularSquare
             button.isBordered = false
@@ -254,7 +255,7 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
             button.target = self
             button.action = #selector(onPinnedTabClicked(_:))
             button.translatesAutoresizingMaskIntoConstraints = false
-            button.widthAnchor.constraint(equalToConstant: 30).isActive = true
+            button.widthAnchor.constraint(equalToConstant: isCollapsed ? 26 : 30).isActive = true
             button.heightAnchor.constraint(equalToConstant: 30).isActive = true
             pinnedStrip.addArrangedSubview(button)
             loadFavicon(for: tab, into: button)
