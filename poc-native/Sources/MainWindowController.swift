@@ -128,7 +128,11 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
         
         // Constraints: Single unified frame!
         sidebarLeadingConstraint = sidebarView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor)
-        
+        sidebarWidthConstraint = sidebarView.widthAnchor.constraint(equalToConstant: sidebarWidth)
+        sidebarView.onHoverChange = { [weak self] hovering in
+            self?.sidebarHoverChanged(hovering)
+        }
+
         NSLayoutConstraint.activate([
             // Root glass fills window
             rootGlass.topAnchor.constraint(equalTo: contentView.topAnchor),
