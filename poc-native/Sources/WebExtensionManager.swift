@@ -38,6 +38,7 @@ public final class WebExtensionManager: NSObject, WKWebExtensionControllerDelega
         guard let ctx = brambleContext, let action = ctx.action(for: nil) else { return nil }
         guard let webView = action.popupWebView else { return nil }
         BrambleNativeBridge.shared.applyTo(userContentController: webView.configuration.userContentController)
+        DeveloperConsole.shared.install(on: webView.configuration.userContentController)
         return webView
     }
 
@@ -81,6 +82,16 @@ public final class WebExtensionManager: NSObject, WKWebExtensionControllerDelega
         if let configuration = context.webViewConfiguration {
             BrambleNativeBridge.shared.applyTo(userContentController: configuration.userContentController)
             DeveloperConsole.shared.install(on: configuration.userContentController)
+        }
+
+        if isBramble, let previousContext = brambleContext {
+            do {
+                try controller.unload(previousContext)
+            } catch {
+                DeveloperConsole.shared.record(level: "ERROR", source: "Extension · Bramble", message: "Could not unload previous Bramble context: \(error.localizedDescription)")
+            }
+            loadedExtensions.removeAll { $0.id == "bramble" }
+            brambleContext = nil
         }
 
         if isBramble {
@@ -182,12 +193,24 @@ public final class WebExtensionManager: NSObject, WKWebExtensionControllerDelega
             options: [.skipsHiddenFiles]
         ) else { return }
 
-        for entry in entries {
+        // Chrome and Firefox Bramble packages share one extension identity and one
+        // profile install slot. Prefer the canonical "bramble" directory if a legacy
+        // "bramble-firefox" directory also exists, so WebKit never loads both variants.
+        let brambleEntries = entries.filter {
+            $0.lastPathComponent.localizedCaseInsensitiveContains("bramble")
+        }
+        let preferredBramble = brambleEntries.first(where: { $0.lastPathComponent == "bramble" })
+            ?? brambleEntries.first
+        let selectedEntries = entries.filter { entry in
+            !brambleEntries.contains(entry) || entry == preferredBramble
+        }
+
+        for entry in selectedEntries {
             do {
                 let extensionRoot = try Self.findManifestRoot(in: entry)
                 _ = try await loadExtension(from: extensionRoot)
             } catch {
-                print("[WebExtension] Skipping \(entry.lastPathComponent): \(error.localizedDescription)")
+                DeveloperConsole.shared.record(level: "ERROR", source: "Extension Loader", message: "Could not load \(entry.lastPathComponent): \(error.localizedDescription)")
             }
         }
     }
