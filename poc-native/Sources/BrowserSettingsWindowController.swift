@@ -155,7 +155,7 @@ public final class BrowserSettingsWindowController: NSWindowController {
             return
         }
         next.sshProxyPort = port
-        next.sshProxyBindAddress = sshProxyBindAddress.indexOfSelectedItem == 1 ? "0.0.0.0" : "127.0.0.1"
+        next.sshProxyBindAddress = next.sshProxyShareEnabled && sshProxyBindAddress.indexOfSelectedItem == 1 ? "0.0.0.0" : "127.0.0.1"
         if (next.sshProxyEnabled || next.sshProxyShareEnabled) && next.sshHost.isEmpty {
             let alert = NSAlert()
             alert.messageText = "SSH host required"
