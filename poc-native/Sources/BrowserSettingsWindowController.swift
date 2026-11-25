@@ -73,13 +73,13 @@ public final class BrowserSettingsWindowController: NSWindowController {
         proxySharingWarning.textColor = .secondaryLabelColor
         proxySharingWarning.maximumNumberOfLines = 3
 
-        let copyProxyButton = NSButton(title: "Copy SOCKS5 address", target: self, action: #selector(copyProxyAddress))
+        let copyProxyButton = NSButton(title: "Copy local SOCKS5 address", target: self, action: #selector(copyProxyAddress))
         copyProxyButton.bezelStyle = .rounded
         let saveButton = NSButton(title: "Save", target: self, action: #selector(saveSettings))
         saveButton.bezelStyle = .rounded
         saveButton.keyEquivalent = "\r"
 
-        let stack = NSStackView(views: [heading, description, searchRow, startRow, restoreSession, showSidebar, connectionHeading, sshProxyEnabled, sshHostRow, sshProxyShareEnabled, sshPortRow, sshBindRow, proxySharingWarning, sshStatus, copyProxyButton, saveButton])
+        let stack = NSStackView(views: [heading, description, searchRow, startRow, restoreSession, showSidebar, connectionHeading, sshProxyEnabled, sshHostRow, sshProxyShareEnabled, sshPortRow, sshRemoteHostRow, sshRemotePortRow, sshBindRow, proxySharingWarning, sshStatus, copyProxyButton, saveButton])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 18
