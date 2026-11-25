@@ -169,19 +169,25 @@ final class BrambleNativeMessagingConnection {
 
         connection.receive(minimumIncompleteLength: 1, maximumLength: remaining) { [weak self] data, _, isComplete, error in
             guard let self else { return }
-            var next = accumulated
-            if let data, !data.isEmpty { next.append(data) }
+            Task { @MainActor in
+                guard !self.isClosed else {
+                    completion(nil, Self.makeError(7, "The Bramble native-messaging connection is closed."))
+                    return
+                }
+                var next = accumulated
+                if let data, !data.isEmpty { next.append(data) }
 
-            if next.count == count {
-                completion(next, nil)
-            } else if let error {
-                completion(nil, error)
-            } else if isComplete {
-                completion(nil, Self.makeError(8, "The Bramble desktop app closed the native-messaging socket."))
-            } else if next.count == accumulated.count {
-                completion(nil, Self.makeError(9, "The Bramble desktop socket returned no data."))
-            } else {
-                self.receiveExactly(count, accumulated: next, completion: completion)
+                if next.count == count {
+                    completion(next, nil)
+                } else if let error {
+                    completion(nil, error)
+                } else if isComplete {
+                    completion(nil, Self.makeError(8, "The Bramble desktop app closed the native-messaging socket."))
+                } else if next.count == accumulated.count {
+                    completion(nil, Self.makeError(9, "The Bramble desktop socket returned no data."))
+                } else {
+                    self.receiveExactly(count, accumulated: next, completion: completion)
+                }
             }
         }
     }
