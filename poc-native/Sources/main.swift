@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let wc = MainWindowController()
         wc.showWindow(nil)
         wc.window?.makeKeyAndOrderFront(nil)
+        wc.restoreSavedWindowState()
         self.windowController = wc
 
         NSApp.activate(ignoringOtherApps: true)
@@ -41,6 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        windowController?.persistWindowState()
         SshTunnelManager.shared.shutdown()
     }
 }

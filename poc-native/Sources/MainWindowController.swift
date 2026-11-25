@@ -55,6 +55,9 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     private var sidebarRevealTask: Task<Void, Never>?
     private var sidebarWidth: CGFloat = 280.0
     private let collapsedSidebarWidth: CGFloat = 64.0
+    private var windowStateSaveWorkItem: DispatchWorkItem?
+    private var lastNormalWindowFrame: NSRect?
+    private var shouldRestoreZoomedWindow = false
     
     private var bramblePopover: NSPopover?
     private var downloadsPopover: NSPopover?
@@ -65,8 +68,10 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     private var displayedNavigationErrorTabID: UUID?
     
     public init() {
+        let defaultFrame = NSRect(x: 100, y: 100, width: 1240, height: 820)
+        let restoredState = BrowserWindowStateStore.shared.restoration(fallbackFrame: defaultFrame)
         let window = SurffishBrowserWindow(
-            contentRect: NSRect(x: 100, y: 100, width: 1240, height: 820),
+            contentRect: restoredState.frame,
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -81,6 +86,8 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
         window.minSize = NSSize(width: 860, height: 540)
         
         super.init(window: window)
+        lastNormalWindowFrame = restoredState.frame
+        shouldRestoreZoomedWindow = restoredState.isZoomed
         window.delegate = self
         setupUI()
     }
@@ -825,7 +832,63 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
         }
     }
 
+    public func restoreSavedWindowState() {
+        guard shouldRestoreZoomedWindow, let window else { return }
+        shouldRestoreZoomedWindow = false
+        if !window.isZoomed { window.zoom(nil) }
+    }
+
+    public func windowDidMove(_ notification: Notification) {
+        scheduleWindowStateSave()
+    }
+
+    public func windowDidResize(_ notification: Notification) {
+        scheduleWindowStateSave()
+    }
+
+    public func windowDidEndLiveResize(_ notification: Notification) {
+        scheduleWindowStateSave()
+    }
+
+    public func windowShouldZoom(_ window: NSWindow, toFrame newFrame: NSRect) -> Bool {
+        if !window.isZoomed { lastNormalWindowFrame = window.frame }
+        return true
+    }
+
+    private func scheduleWindowStateSave() {
+        guard let window,
+              !window.isMiniaturized,
+              !window.styleMask.contains(.fullScreen) else { return }
+        windowStateSaveWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.persistWindowState()
+        }
+        windowStateSaveWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(300), execute: workItem)
+    }
+
+    public func persistWindowState() {
+        windowStateSaveWorkItem?.cancel()
+        windowStateSaveWorkItem = nil
+        guard let window,
+              !window.isMiniaturized,
+              !window.styleMask.contains(.fullScreen) else { return }
+        let frame: NSRect
+        if window.isZoomed {
+            frame = lastNormalWindowFrame ?? window.frame
+        } else {
+            frame = window.frame
+            lastNormalWindowFrame = frame
+        }
+        BrowserWindowStateStore.shared.save(frame: frame, isZoomed: window.isZoomed)
+    }
+
+    public func windowDidExitFullScreen(_ notification: Notification) {
+        scheduleWindowStateSave()
+    }
+
     public func windowWillClose(_ notification: Notification) {
+        persistWindowState()
         TabManager.shared.persistSession()
     }
 }

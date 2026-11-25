@@ -103,3 +103,8 @@ The following Electron capabilities require native alternatives or an explicit c
 - The Linux host cannot compile or launch AppKit/WebKit; the dedicated macOS build above verifies compilation but does not establish interactive runtime behavior.
 - Interactive AppKit/WebKit behavior: not verified here; it requires macOS 26+ runtime QA.
 - The checklist is anchored to the exact Electron commit above. It is not a claim that all Electron features are applicable or complete in the native app.
+
+## Native window geometry follow-up
+
+- **Single-window frame persistence — Source-checked; macOS build and runtime QA pending.** The native app stores a versioned frame plus zoomed state in the active profile's `browser-window-state.json`, separate from tab-session data. Restore picks the visible screen with the most overlap, clamps the frame into its visible area, and falls back to a safe default when saved bounds are malformed or no longer visible. Move/resize saves are debounced and flushed on close/quit. Fullscreen/minimized-state restoration and multiple-window geometry are not implemented.
+- When zoomed, the saved rectangle remains the last normal (pre-zoom) frame; zoom is reapplied after the browser window is shown.

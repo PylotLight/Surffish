@@ -424,3 +424,8 @@ The native browser is MVP-ready when:
 - Tunnel loss never silently falls back to direct browser traffic.
 - macOS 26 CI builds pass and the app has been runtime-tested on the developer's macOS 26+ machine with the real NAS.
 - No feature is marked complete based solely on compiling or appearing in Settings; each exposed control must have verified behaviour.
+
+### Native single-window geometry follow-up
+
+The native app now stores the main browser window's frame and zoomed/maximized state in a versioned, profile-local `browser-window-state.json`, separate from tab-session metadata. Startup fits saved geometry to the visible frame of the display with the greatest overlap; malformed or no-longer-visible bounds fall back to a screen-safe default. Move/resize writes are debounced and flushed on close/quit. Full-screen restoration, minimized-state restoration, multiple windows, and interactive macOS runtime QA remain open. The source-contract test is registered in the manual macOS workflow; a native macOS build is required before marking this slice build-verified.
+When zoomed, the saved rectangle remains the last normal (pre-zoom) frame, so restoring zoom does not lose the user's windowed size.
