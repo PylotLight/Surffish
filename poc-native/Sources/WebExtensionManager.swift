@@ -71,6 +71,8 @@ public final class WebExtensionManager: NSObject, WKWebExtensionControllerDelega
     public func loadExtension(from directoryURL: URL) async throws -> LoadedExtensionInfo {
         let ext = try await WKWebExtension(resourceBaseURL: directoryURL)
         let context = WKWebExtensionContext(for: ext)
+        // Expose extension pages, popups and background content to Safari Web Inspector.
+        context.isInspectable = true
         let name = ext.displayName ?? directoryURL.lastPathComponent
         let isBramble = name.localizedCaseInsensitiveContains("bramble") ||
             directoryURL.lastPathComponent.localizedCaseInsensitiveContains("bramble")
