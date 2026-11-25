@@ -19,6 +19,17 @@ public final class WebExtensionManager: NSObject, WKWebExtensionControllerDelega
     public let controller = WKWebExtensionController()
     public private(set) var loadedExtensions: [LoadedExtensionInfo] = []
     public var onExtensionsChanged: (([LoadedExtensionInfo]) -> Void)?
+    private var extensionObservers: [([LoadedExtensionInfo]) -> Void] = []
+
+    public func addExtensionsObserver(_ observer: @escaping ([LoadedExtensionInfo]) -> Void) {
+        extensionObservers.append(observer)
+        observer(loadedExtensions)
+    }
+
+    private func notifyExtensionsChanged() {
+        onExtensionsChanged?(loadedExtensions)
+        extensionObservers.forEach { $0(loadedExtensions) }
+    }
     public private(set) var brambleContext: WKWebExtensionContext?
     private var brambleNativeConnections: [ObjectIdentifier: BrambleNativeMessagingConnection] = [:]
     private let brambleWorkaroundControllers = NSHashTable<WKUserContentController>.weakObjects()
