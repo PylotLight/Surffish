@@ -8,6 +8,7 @@ public protocol SidebarViewDelegate: AnyObject {
     func sidebarDidOpenExtensions()
     func sidebarDidOpenSettings()
     func sidebarDidQuit()
+    func sidebarDidToggleSidebar()
 }
 
 private final class SidebarRowView: NSView {
@@ -267,8 +268,7 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
         pin.isHidden = isCollapsed || !active
         cell.addSubview(pin)
 
-        NSLayoutConstraint.activate([
-            icon.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: isCollapsed ? 0 : 12),
+        var iconConstraints: [NSLayoutConstraint] = [
             icon.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
             icon.widthAnchor.constraint(equalToConstant: 18),
             icon.heightAnchor.constraint(equalToConstant: 18),
@@ -281,7 +281,13 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
             close.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -6),
             close.widthAnchor.constraint(equalToConstant: 22),
             close.heightAnchor.constraint(equalToConstant: 22)
-        ])
+        ]
+        iconConstraints.append(
+            isCollapsed
+                ? icon.centerXAnchor.constraint(equalTo: cell.centerXAnchor)
+                : icon.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 12)
+        )
+        NSLayoutConstraint.activate(iconConstraints)
         title.isHidden = isCollapsed
         cell.onSelect = { [weak self] in self?.delegate?.sidebarDidSelectTab(id: tab.id) }
         cell.onHover = { [weak close, weak pin] hovering in
@@ -304,15 +310,20 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
         title.translatesAutoresizingMaskIntoConstraints = false
         title.isHidden = isCollapsed
         cell.addSubview(title)
-        NSLayoutConstraint.activate([
-            icon.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: isCollapsed ? 0 : 12),
+        var settingsConstraints: [NSLayoutConstraint] = [
             icon.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
             icon.widthAnchor.constraint(equalToConstant: 18),
             icon.heightAnchor.constraint(equalToConstant: 18),
             title.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 10),
             title.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
             title.trailingAnchor.constraint(lessThanOrEqualTo: cell.trailingAnchor, constant: -8)
-        ])
+        ]
+        settingsConstraints.append(
+            isCollapsed
+                ? icon.centerXAnchor.constraint(equalTo: cell.centerXAnchor)
+                : icon.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 12)
+        )
+        NSLayoutConstraint.activate(settingsConstraints)
     }
 
     private func loadFavicon(for tab: TabItem, into imageView: NSImageView) {
@@ -333,7 +344,7 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
         _ = tabID
     }
 
-    @objc private func onCollapse() { delegate?.sidebarDidOpenSettings(); }
+    @objc private func onCollapse() { delegate?.sidebarDidToggleSidebar() }
     @objc private func onNewTab() { delegate?.sidebarDidCreateNewTab() }
     @objc private func onExtensions() { delegate?.sidebarDidOpenExtensions() }
     @objc private func onSettings() { delegate?.sidebarDidOpenSettings() }
