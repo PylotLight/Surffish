@@ -12,23 +12,42 @@ public protocol SidebarViewDelegate: AnyObject {
 
 private final class SidebarRowView: NSView {
     var onSelect: (() -> Void)?
+    var onHover: ((Bool) -> Void)?
+    private var tracking: NSTrackingArea?
 
-    override func mouseDown(with event: NSEvent) {
-        onSelect?()
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let tracking { removeTrackingArea(tracking) }
+        let next = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(next)
+        tracking = next
     }
+
+    override func mouseEntered(with event: NSEvent) { onHover?(true) }
+    override func mouseExited(with event: NSEvent) { onHover?(false) }
+    override func mouseDown(with event: NSEvent) { onSelect?() }
 }
 
 public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTableViewDelegate {
     public weak var delegate: SidebarViewDelegate?
-    private let workspaceLabel = NSTextField(labelWithString: "Tabs")
-    private let newTabButton = NSButton(title: "+ New Tab", target: nil, action: nil)
+    public var onHoverChange: ((Bool) -> Void)?
+    private let workspaceLabel = NSTextField(labelWithString: "TABS")
+    private let collapseButton = NSButton()
+    private let newTabButton = NSButton()
     private let tableView = NSTableView()
     private let scrollView = NSScrollView()
     private let footer = NSStackView()
-    private let extensionsButton = NSButton(title: "Extensions", target: nil, action: nil)
-    private let settingsButton = NSButton(title: "Settings", target: nil, action: nil)
-    private let quitButton = NSButton(title: "Quit Surffish", target: nil, action: nil)
+    private let extensionsButton = NSButton()
+    private let settingsButton = NSButton()
+    private let quitButton = NSButton()
     private var isSettingsTabActive = false
+    private var isCollapsed = false
+    private var tracking: NSTrackingArea?
 
     public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -40,42 +59,47 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
         setupUI()
     }
 
+    public override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let tracking { removeTrackingArea(tracking) }
+        let next = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(next)
+        tracking = next
+    }
+
+    public override func mouseEntered(with event: NSEvent) { onHoverChange?(true) }
+    public override func mouseExited(with event: NSEvent) { onHoverChange?(false) }
+
     private func setupUI() {
         material = .underWindowBackground
         blendingMode = .withinWindow
         state = .active
         wantsLayer = true
 
-        // The shared window glass/tint is drawn once behind this view and the omnibox.
-        // Keeping the sidebar itself transparent avoids a hard vertical seam at the toolbar.
-        workspaceLabel.stringValue = "TABS"
-        workspaceLabel.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+        workspaceLabel.font = .systemFont(ofSize: 11, weight: .semibold)
         workspaceLabel.textColor = NSColor(white: 0.95, alpha: 0.62)
         workspaceLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(workspaceLabel)
 
-        newTabButton.title = ""
-        newTabButton.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "New tab")
-        newTabButton.imagePosition = .imageOnly
-        newTabButton.bezelStyle = .rounded
-        newTabButton.isBordered = false
-        newTabButton.contentTintColor = .secondaryLabelColor
-        newTabButton.toolTip = "New tab"
-        newTabButton.target = self
-        newTabButton.action = #selector(onNewTab)
-        newTabButton.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(newTabButton)
+        configureIconButton(collapseButton, symbol: "sidebar.left", tooltip: "Collapse sidebar", action: #selector(onCollapse))
+        configureIconButton(newTabButton, symbol: "plus", tooltip: "New tab", action: #selector(onNewTab))
 
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("TabColumn"))
-        column.width = 280
+        column.width = 260
         tableView.addTableColumn(column)
         tableView.headerView = nil
         tableView.backgroundColor = .clear
         tableView.dataSource = self
         tableView.delegate = self
-        tableView.rowHeight = 40
+        tableView.rowHeight = 42
         tableView.intercellSpacing = NSSize(width: 0, height: 3)
         tableView.selectionHighlightStyle = .none
+        tableView.focusRingType = .none
 
         scrollView.documentView = tableView
         scrollView.hasVerticalScroller = true
@@ -87,48 +111,97 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
         footer.orientation = .vertical
         footer.alignment = .leading
         footer.distribution = .fill
-        footer.spacing = 5
+        footer.spacing = 4
         footer.translatesAutoresizingMaskIntoConstraints = false
         addSubview(footer)
 
-        configureFooterButton(extensionsButton, symbol: "puzzlepiece.extension", action: #selector(onExtensions))
-        configureFooterButton(settingsButton, symbol: "gearshape", action: #selector(onSettings))
-        configureFooterButton(quitButton, symbol: "power", action: #selector(onQuit))
+        configureFooterButton(extensionsButton, symbol: "puzzlepiece.extension", title: "Extensions", action: #selector(onExtensions))
+        configureFooterButton(settingsButton, symbol: "gearshape", title: "Settings", action: #selector(onSettings))
+        configureFooterButton(quitButton, symbol: "power", title: "Quit Surffish", action: #selector(onQuit))
         footer.addArrangedSubview(extensionsButton)
         footer.addArrangedSubview(settingsButton)
         footer.addArrangedSubview(quitButton)
 
         NSLayoutConstraint.activate([
-            workspaceLabel.topAnchor.constraint(equalTo: topAnchor, constant: 48),
-            workspaceLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 24),
-            newTabButton.centerYAnchor.constraint(equalTo: workspaceLabel.centerYAnchor),
-            newTabButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
-            newTabButton.widthAnchor.constraint(equalToConstant: 28),
-            newTabButton.heightAnchor.constraint(equalToConstant: 28),
+            workspaceLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20),
+            workspaceLabel.centerYAnchor.constraint(equalTo: collapseButton.centerYAnchor),
+            collapseButton.topAnchor.constraint(equalTo: topAnchor, constant: 43),
+            collapseButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            collapseButton.widthAnchor.constraint(equalToConstant: 30),
+            collapseButton.heightAnchor.constraint(equalToConstant: 30),
+            workspaceLabel.trailingAnchor.constraint(lessThanOrEqualTo: collapseButton.leadingAnchor, constant: -8),
 
-            scrollView.topAnchor.constraint(equalTo: workspaceLabel.bottomAnchor, constant: 12),
-            scrollView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
-            scrollView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            newTabButton.topAnchor.constraint(equalTo: collapseButton.bottomAnchor, constant: 14),
+            newTabButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            newTabButton.widthAnchor.constraint(equalToConstant: 30),
+            newTabButton.heightAnchor.constraint(equalToConstant: 30),
+
+            scrollView.topAnchor.constraint(equalTo: newTabButton.bottomAnchor, constant: 10),
+            scrollView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            scrollView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
             scrollView.bottomAnchor.constraint(equalTo: footer.topAnchor, constant: -12),
 
-            footer.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
-            footer.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
-            footer.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -18)
+            footer.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            footer.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            footer.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -16)
         ])
+        setCollapsed(false)
     }
 
-    private func configureFooterButton(_ button: NSButton, symbol: String, action: Selector) {
-        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: button.title)
+    private func configureIconButton(_ button: NSButton, symbol: String, tooltip: String, action: Selector) {
+        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: tooltip)
+        button.imagePosition = .imageOnly
+        button.bezelStyle = .rounded
+        button.isBordered = false
+        button.contentTintColor = .secondaryLabelColor
+        button.toolTip = tooltip
+        button.target = self
+        button.action = action
+        button.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(button)
+    }
+
+    private func configureFooterButton(_ button: NSButton, symbol: String, title: String, action: Selector) {
+        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: title)
         button.imagePosition = .imageLeading
         button.alignment = .left
+        button.title = title
         button.font = .systemFont(ofSize: 12, weight: .medium)
         button.contentTintColor = .secondaryLabelColor
         button.bezelStyle = .rounded
         button.isBordered = false
         button.target = self
         button.action = action
+        button.toolTip = title
+        button.setAccessibilityLabel(title)
         button.translatesAutoresizingMaskIntoConstraints = false
-        button.heightAnchor.constraint(equalToConstant: 30).isActive = true
+        button.heightAnchor.constraint(equalToConstant: 32).isActive = true
+    }
+
+    public func setCollapsed(_ collapsed: Bool) {
+        guard isCollapsed != collapsed else { return }
+        isCollapsed = collapsed
+        workspaceLabel.isHidden = collapsed
+        collapseButton.image = NSImage(
+            systemSymbolName: collapsed ? "sidebar.right" : "sidebar.left",
+            accessibilityDescription: collapsed ? "Expand sidebar" : "Collapse sidebar"
+        )
+        collapseButton.toolTip = collapsed ? "Expand sidebar" : "Collapse sidebar"
+        newTabButton.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "New tab")
+        newTabButton.title = collapsed ? "" : "New tab"
+        newTabButton.imagePosition = collapsed ? .imageOnly : .imageLeading
+        newTabButton.alignment = collapsed ? .center : .left
+        newTabButton.contentTintColor = .secondaryLabelColor
+        newTabButton.toolTip = "New tab"
+        for button in [extensionsButton, settingsButton, quitButton] {
+            button.title = collapsed ? "" : (button === extensionsButton ? "Extensions" : button === settingsButton ? "Settings" : "Quit Surffish")
+            button.imagePosition = .imageOnly
+            button.alignment = .center
+            button.toolTip = button === extensionsButton ? "Extensions" : button === settingsButton ? "Settings" : "Quit Surffish"
+        }
+        footer.alignment = collapsed ? .centerX : .leading
+        tableView.reloadData()
+        needsLayout = true
     }
 
     public func reloadTabs() { tableView.reloadData() }
@@ -136,6 +209,7 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
     public func setSettingsTabActive(_ active: Bool) {
         isSettingsTabActive = active
         tableView.reloadData()
+        settingsButton.contentTintColor = active ? .controlAccentColor : .secondaryLabelColor
     }
 
     public func numberOfRows(in tableView: NSTableView) -> Int {
@@ -144,100 +218,134 @@ public final class SidebarView: NSVisualEffectView, NSTableViewDataSource, NSTab
 
     public func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let tabs = TabManager.shared.tabs
+        let cell = SidebarRowView()
+        cell.wantsLayer = true
+        cell.layer?.cornerRadius = 9
+        cell.layer?.backgroundColor = NSColor(white: 1, alpha: 0.035).cgColor
+
         if isSettingsTabActive && row == tabs.count {
-            let cell = SidebarRowView()
-            cell.wantsLayer = true
-            cell.layer?.cornerRadius = 8
-            cell.layer?.backgroundColor = NSColor(white: 1.0, alpha: 0.14).cgColor
-
-            let bar = NSView(frame: NSRect(x: 0, y: 4, width: 3, height: 28))
-            bar.wantsLayer = true
-            bar.layer?.backgroundColor = NSColor.systemBlue.cgColor
-            bar.layer?.cornerRadius = 1.5
-            cell.addSubview(bar)
-
-            let icon = NSImageView(frame: NSRect(x: 10, y: 10, width: 15, height: 15))
-            icon.image = NSImage(systemSymbolName: "gearshape.fill", accessibilityDescription: "Settings")
-            icon.contentTintColor = .secondaryLabelColor
-            cell.addSubview(icon)
-
-            let title = NSTextField(labelWithString: "Settings")
-            title.font = NSFont.systemFont(ofSize: 12, weight: .medium)
-            title.textColor = .white
-            title.frame = NSRect(x: 34, y: 8, width: 188, height: 20)
-            cell.addSubview(title)
-
+            configureSettingsRow(cell)
             cell.onSelect = { [weak self] in self?.delegate?.sidebarDidOpenSettings() }
             return cell
         }
         guard row >= 0, row < tabs.count else { return nil }
         let tab = tabs[row]
         let active = !isSettingsTabActive && TabManager.shared.activeTabId == tab.id
-        let cell = SidebarRowView()
-        cell.wantsLayer = true
-        cell.layer?.cornerRadius = 8
         cell.layer?.backgroundColor = active
-            ? NSColor(white: 1.0, alpha: 0.14).cgColor
-            : NSColor(white: 1.0, alpha: 0.04).cgColor
+            ? NSColor(white: 1, alpha: 0.13).cgColor
+            : NSColor(white: 1, alpha: 0.025).cgColor
 
-        if active {
-            let bar = NSView(frame: NSRect(x: 0, y: 4, width: 3, height: 28))
-            bar.wantsLayer = true
-            bar.layer?.backgroundColor = NSColor.systemBlue.cgColor
-            bar.layer?.cornerRadius = 1.5
-            cell.addSubview(bar)
-        }
-
-        let iconName = tab.isPinned ? "pin.fill" : (tab.isLoading ? "arrow.triangle.2.circlepath" : "globe")
-        let icon = NSImageView(frame: NSRect(x: 10, y: 10, width: 15, height: 15))
-        icon.image = NSImage(systemSymbolName: iconName, accessibilityDescription: "Tab")
+        let icon = NSImageView()
+        icon.image = NSImage(systemSymbolName: tab.isPinned ? "pin.fill" : "globe", accessibilityDescription: "Tab")
         icon.contentTintColor = .secondaryLabelColor
+        icon.imageScaling = .scaleProportionallyDown
+        icon.translatesAutoresizingMaskIntoConstraints = false
         cell.addSubview(icon)
 
         let title = NSTextField(labelWithString: tab.title.isEmpty ? "New Tab" : tab.title)
-        title.font = NSFont.systemFont(ofSize: 12, weight: active ? .medium : .regular)
-        title.textColor = active ? .white : .labelColor
+        title.font = .systemFont(ofSize: 12, weight: active ? .semibold : .regular)
+        title.textColor = active ? .labelColor : .secondaryLabelColor
         title.lineBreakMode = .byTruncatingTail
-        title.frame = NSRect(x: 34, y: 8, width: 188, height: 20)
+        title.translatesAutoresizingMaskIntoConstraints = false
         cell.addSubview(title)
 
-        let pin = NSButton(image: NSImage(systemSymbolName: tab.isPinned ? "pin.slash" : "pin", accessibilityDescription: "Toggle pin")!, target: self, action: #selector(onPinTabClicked(_:)))
-        pin.isBordered = false
-        pin.contentTintColor = .secondaryLabelColor
-        pin.tag = row
-        pin.frame = NSRect(x: 228, y: 8, width: 20, height: 20)
-        cell.addSubview(pin)
-
-        let close = NSButton(
-            image: NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close tab")!,
-            target: self,
-            action: #selector(onCloseTabClicked(_:))
-        )
+        let close = NSButton(image: NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close tab")!, target: self, action: #selector(onCloseTabClicked(_:)))
         close.isBordered = false
         close.contentTintColor = .tertiaryLabelColor
         close.toolTip = "Close tab"
         close.tag = row
-        close.frame = NSRect(x: 254, y: 8, width: 20, height: 20)
+        close.translatesAutoresizingMaskIntoConstraints = false
+        close.isHidden = isCollapsed
         cell.addSubview(close)
 
+        let pin = NSButton(image: NSImage(systemSymbolName: tab.isPinned ? "pin.slash" : "pin", accessibilityDescription: "Toggle pin")!, target: self, action: #selector(onPinTabClicked(_:)))
+        pin.isBordered = false
+        pin.contentTintColor = .tertiaryLabelColor
+        pin.toolTip = tab.isPinned ? "Unpin tab" : "Pin tab"
+        pin.tag = row
+        pin.translatesAutoresizingMaskIntoConstraints = false
+        pin.isHidden = isCollapsed || !active
+        cell.addSubview(pin)
+
+        NSLayoutConstraint.activate([
+            icon.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: isCollapsed ? 0 : 12),
+            icon.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+            icon.widthAnchor.constraint(equalToConstant: 18),
+            icon.heightAnchor.constraint(equalToConstant: 18),
+            icon.trailingAnchor.constraint(equalTo: title.leadingAnchor, constant: -10),
+            title.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+            title.trailingAnchor.constraint(equalTo: pin.leadingAnchor, constant: -4),
+            pin.trailingAnchor.constraint(equalTo: close.leadingAnchor, constant: -2),
+            pin.widthAnchor.constraint(equalToConstant: 22),
+            pin.heightAnchor.constraint(equalToConstant: 22),
+            close.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -6),
+            close.widthAnchor.constraint(equalToConstant: 22),
+            close.heightAnchor.constraint(equalToConstant: 22)
+        ])
+        title.isHidden = isCollapsed
         cell.onSelect = { [weak self] in self?.delegate?.sidebarDidSelectTab(id: tab.id) }
+        cell.onHover = { [weak close, weak pin] hovering in
+            close?.isHidden = !hovering || self.isCollapsed
+            pin?.isHidden = !hovering || self.isCollapsed
+        }
+        loadFavicon(for: tab, into: icon)
         return cell
     }
 
+    private func configureSettingsRow(_ cell: SidebarRowView) {
+        let icon = NSImageView()
+        icon.image = NSImage(systemSymbolName: "gearshape.fill", accessibilityDescription: "Settings")
+        icon.contentTintColor = .secondaryLabelColor
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        cell.addSubview(icon)
+        let title = NSTextField(labelWithString: "Settings")
+        title.font = .systemFont(ofSize: 12, weight: .medium)
+        title.textColor = .labelColor
+        title.translatesAutoresizingMaskIntoConstraints = false
+        title.isHidden = isCollapsed
+        cell.addSubview(title)
+        NSLayoutConstraint.activate([
+            icon.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: isCollapsed ? 0 : 12),
+            icon.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+            icon.widthAnchor.constraint(equalToConstant: 18),
+            icon.heightAnchor.constraint(equalToConstant: 18),
+            title.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 10),
+            title.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+            title.trailingAnchor.constraint(lessThanOrEqualTo: cell.trailingAnchor, constant: -8)
+        ])
+    }
+
+    private func loadFavicon(for tab: TabItem, into imageView: NSImageView) {
+        guard let host = tab.webView.url?.host ?? tab.url?.host,
+              let encodedHost = host.addingPercentEncoding(withAllowedCharacters: .urlHostAllowed),
+              let url = URL(string: "https://www.google.com/s2/favicons?domain=\(encodedHost)&sz=64") else {
+            imageView.image = NSImage(systemSymbolName: "globe", accessibilityDescription: "Tab")
+            return
+        }
+        let tabID = tab.id
+        URLSession.shared.dataTask(with: url) { [weak imageView] data, _, _ in
+            guard let data, let image = NSImage(data: data) else { return }
+            DispatchQueue.main.async {
+                guard let imageView, imageView.window != nil else { return }
+                imageView.image = image
+            }
+        }.resume()
+        _ = tabID
+    }
+
+    @objc private func onCollapse() { delegate?.sidebarDidOpenSettings(); }
+    @objc private func onNewTab() { delegate?.sidebarDidCreateNewTab() }
+    @objc private func onExtensions() { delegate?.sidebarDidOpenExtensions() }
+    @objc private func onSettings() { delegate?.sidebarDidOpenSettings() }
+    @objc private func onQuit() { delegate?.sidebarDidQuit() }
     @objc private func onPinTabClicked(_ sender: NSButton) {
         let row = sender.tag
         guard row >= 0, row < TabManager.shared.tabs.count else { return }
         delegate?.sidebarDidTogglePinTab(id: TabManager.shared.tabs[row].id)
     }
-
     @objc private func onCloseTabClicked(_ sender: NSButton) {
         let row = sender.tag
         guard row >= 0, row < TabManager.shared.tabs.count else { return }
         delegate?.sidebarDidCloseTab(id: TabManager.shared.tabs[row].id)
     }
-
-    @objc private func onNewTab() { delegate?.sidebarDidCreateNewTab() }
-    @objc private func onExtensions() { delegate?.sidebarDidOpenExtensions() }
-    @objc private func onSettings() { delegate?.sidebarDidOpenSettings() }
-    @objc private func onQuit() { delegate?.sidebarDidQuit() }
 }
