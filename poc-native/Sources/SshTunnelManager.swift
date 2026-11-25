@@ -261,7 +261,11 @@ public final class SshTunnelManager {
     }
 
     private func stopProcess() async {
-        guard let child = process else { return }
+        guard let child = process else {
+            stderrPipe?.fileHandleForReading.readabilityHandler = nil
+            stderrPipe = nil
+            return
+        }
         process = nil
         child.terminationHandler = nil
         if child.isRunning {
