@@ -125,8 +125,12 @@ test("native find-in-page and duplicate/reopen actions are wired to WebKit and m
   const sidebar = read("poc-native/Sources/SidebarView.swift");
 
   assert.match(window, /WKFindConfiguration\(\)/);
-  assert.match(window, /configuration\.caseInsensitive = true/);
+  assert.match(window, /configuration\.caseSensitive = false/);
   assert.match(window, /configuration\.wraps = true/);
+  assert.match(
+    window,
+    /tab\.webView\.find\(query, configuration: configuration\)/,
+  );
   assert.match(findBar, /findPreviousOccurrence/);
   assert.match(findBar, /cancelOperation/);
   assert.match(menu, /menuFind/);

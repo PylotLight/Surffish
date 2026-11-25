@@ -265,10 +265,10 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
             return
         }
         let configuration = WKFindConfiguration()
-        configuration.caseInsensitive = true
+        configuration.caseSensitive = false
         configuration.wraps = true
         configuration.backwards = backwards
-        tab.webView.findString(query, with: configuration) { [weak self] result in
+        tab.webView.find(query, configuration: configuration) { [weak self] result in
             DispatchQueue.main.async {
                 self?.findBarView.setStatus(result.matchFound ? "Found" : "No matches")
             }
