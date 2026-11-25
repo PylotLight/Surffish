@@ -30,7 +30,7 @@ build_profile_app() {
 
     rm -rf "${app_dir}"
     mkdir -p "${macos_dir}" "${resources_dir}"
-    cp "${BINARY}" "${macos_dir}/SurffishNative"
+    cp "${BINARY}" "${macos_dir}/Surffish"
     if [ -d "${ROOT_DIR}/poc-native/Resources/bramble" ]; then
         cp -R "${ROOT_DIR}/poc-native/Resources/bramble" "${resources_dir}/Bramble"
     fi
@@ -41,7 +41,7 @@ build_profile_app() {
 <plist version="1.0">
 <dict>
     <key>CFBundleExecutable</key>
-    <string>SurffishNative</string>
+    <string>Surffish</string>
     <key>CFBundleIdentifier</key>
     <string>${bundle_id}</string>
     <key>CFBundleName</key>
@@ -71,9 +71,9 @@ EOF
     echo "==> Built ${app_dir} (${profile} profile)"
 }
 
-build_profile_app "production" "Surffish Native" "com.surffish.native"
-build_profile_app "development" "Surffish Native Dev" "com.surffish.native.dev"
+build_profile_app "production" "Surffish" "com.surffish.app"
+build_profile_app "development" "Surffish Dev" "com.surffish.app.dev"
 
 echo "==> Both macOS 26 applications built successfully."
-echo "Production: ${BUILD_DIR}/Surffish Native.app"
-echo "Development: ${BUILD_DIR}/Surffish Native Dev.app"
+echo "Production: ${BUILD_DIR}/Surffish.app"
+echo "Development: ${BUILD_DIR}/Surffish Dev.app"
