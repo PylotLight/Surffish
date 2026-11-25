@@ -52,6 +52,23 @@ public final class SshTunnelManager {
         await startTunnel(generation: generation)
     }
 
+    public func shutdown() {
+        enabled = false
+        generation += 1
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        process?.terminationHandler = nil
+        if let child = process, child.isRunning {
+            child.terminate()
+            if child.isRunning {
+                _ = Darwin.kill(child.processIdentifier, SIGKILL)
+            }
+        }
+        process = nil
+        stderrPipe?.fileHandleForReading.readabilityHandler = nil
+        stderrPipe = nil
+    }
+
     public func stop() async {
         enabled = false
         generation += 1
