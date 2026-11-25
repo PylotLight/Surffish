@@ -149,7 +149,7 @@ const SESSION_SECRET_QUERY_KEYS = new Set(
 export const DEFAULT_BROWSER_PROXY_SETTINGS: BrowserProxySettings = {
   enabled: false,
   host: "127.0.0.1",
-  port: 1080,
+  port: 1088,
   sshHost: "",
   sshClient: "builtin",
   bypassLocalNetwork: true,
