@@ -419,6 +419,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     public func sidebarDidOpenExtensions() { showExtensionInstallSheet() }
     public func sidebarDidOpenSettings() { menuOpenSettings() }
     public func sidebarDidQuit() { NSApp.terminate(nil) }
+    public func sidebarDidToggleSidebar() { omniboxDidToggleSidebar() }
 
     private func runTouchIDTest() {
         BrambleNativeBridge.shared.authenticateWithBiometrics { success, error in
