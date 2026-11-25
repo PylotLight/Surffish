@@ -214,14 +214,6 @@ public final class WebExtensionManager: NSObject, WKWebExtensionControllerDelega
                 brambleUrl = u
             }
         }
-        // 3. Fallback to repo path
-        if brambleUrl == nil {
-            let fallback = URL(fileURLWithPath: "/Users/lochy/repos/Personal/Surffish/poc-native/Resources/bramble")
-            if FileManager.default.fileExists(atPath: fallback.appendingPathComponent("manifest.json").path) {
-                brambleUrl = fallback
-            }
-        }
-        
         if let bUrl = brambleUrl {
             do {
                 try await loadExtension(from: bUrl)
@@ -242,16 +234,6 @@ public final class WebExtensionManager: NSObject, WKWebExtensionControllerDelega
             }
         }
         
-        if let base = basePath {
-            let probes = ["chromium-mv3", "bitwarden-mv2"]
-            for name in probes {
-                let path = (base as NSString).appendingPathComponent("scripts/fixtures/extension-probes/\(name)")
-                let url = URL(fileURLWithPath: path)
-                if FileManager.default.fileExists(atPath: url.appendingPathComponent("manifest.json").path) {
-                    _ = try? await loadExtension(from: url)
-                }
-            }
-        }
     }
     
     // MARK: - WKWebExtensionControllerDelegate
