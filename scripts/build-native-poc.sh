@@ -3,22 +3,36 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${ROOT_DIR}/poc-native/build"
-APP_DIR="${BUILD_DIR}/SurffishNative.app"
-MACOS_DIR="${APP_DIR}/Contents/MacOS"
-RESOURCES_DIR="${APP_DIR}/Contents/Resources"
+STAGING_DIR="${BUILD_DIR}/staging"
+BINARY="${STAGING_DIR}/SurffishNative"
 
-echo "==> Building SurffishNative.app..."
-mkdir -p "${MACOS_DIR}" "${RESOURCES_DIR}"
+echo "==> Building Surffish Native for macOS 26 / Apple Silicon..."
+mkdir -p "${STAGING_DIR}"
 
-# Stage Bramble into Application Support if not already present
-APP_SUPPORT_BRAMBLE="${HOME}/Library/Application Support/SurffishNative/Bramble"
-if [ ! -f "${APP_SUPPORT_BRAMBLE}/manifest.json" ] && [ -d "${ROOT_DIR}/poc-native/Resources/bramble" ]; then
-    echo "==> Staging Bramble into ${APP_SUPPORT_BRAMBLE}..."
-    mkdir -p "${APP_SUPPORT_BRAMBLE}"
-    cp -R "${ROOT_DIR}/poc-native/Resources/bramble/"* "${APP_SUPPORT_BRAMBLE}/"
-fi
+xcrun swiftc \
+  -parse-as-library \
+  -target arm64-apple-macosx26.0 \
+  -module-cache-path /tmp/swift-cache \
+  -framework AppKit \
+  -framework WebKit \
+  -framework Network \
+  -framework LocalAuthentication \
+  -o "${BINARY}" \
+  "${ROOT_DIR}"/poc-native/Sources/*.swift
 
-cat << 'EOF' > "${APP_DIR}/Contents/Info.plist"
+build_profile_app() {
+    local profile="$1"
+    local app_name="$2"
+    local bundle_id="$3"
+    local app_dir="${BUILD_DIR}/${app_name}.app"
+    local macos_dir="${app_dir}/Contents/MacOS"
+    local resources_dir="${app_dir}/Contents/Resources"
+
+    rm -rf "${app_dir}"
+    mkdir -p "${macos_dir}" "${resources_dir}"
+    cp "${BINARY}" "${macos_dir}/SurffishNative"
+
+    cat > "${app_dir}/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -26,34 +40,37 @@ cat << 'EOF' > "${APP_DIR}/Contents/Info.plist"
     <key>CFBundleExecutable</key>
     <string>SurffishNative</string>
     <key>CFBundleIdentifier</key>
-    <string>com.surffish.native-poc</string>
+    <string>${bundle_id}</string>
     <key>CFBundleName</key>
-    <string>SurffishNative</string>
+    <string>${app_name}</string>
+    <key>CFBundleDisplayName</key>
+    <string>${app_name}</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
     <string>1.0</string>
     <key>LSMinimumSystemVersion</key>
-    <string>15.4</string>
+    <string>26.0</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>SurffishProfile</key>
+    <string>${profile}</string>
 </dict>
 </plist>
 EOF
 
-xcrun swiftc \
-  -parse-as-library \
-  -target arm64-apple-macos15.4 \
-  -module-cache-path /tmp/swift-cache \
-  -framework AppKit \
-  -framework WebKit \
-  -framework Network \
-  -framework LocalAuthentication \
-  -o "${MACOS_DIR}/SurffishNative" \
-  "${ROOT_DIR}"/poc-native/Sources/*.swift
+    local profile_support="${HOME}/Library/Application Support/SurffishNative/Profiles/${profile^}/Bramble"
+    if [ ! -f "${profile_support}/manifest.json" ] && [ -d "${ROOT_DIR}/poc-native/Resources/bramble" ]; then
+        mkdir -p "${profile_support}"
+        cp -R "${ROOT_DIR}/poc-native/Resources/bramble/"* "${profile_support}/"
+    fi
 
-echo "==> Built successfully: ${APP_DIR}"
-echo "To run:"
-echo "  open ${APP_DIR}"
-echo "or run directly in terminal:"
-echo "  ${MACOS_DIR}/SurffishNative"
+    echo "==> Built ${app_dir} (${profile} profile)"
+}
+
+build_profile_app "production" "Surffish Native" "com.surffish.native"
+build_profile_app "development" "Surffish Native Dev" "com.surffish.native.dev"
+
+echo "==> Both macOS 26 applications built successfully."
+echo "Production: ${BUILD_DIR}/Surffish Native.app"
+echo "Development: ${BUILD_DIR}/Surffish Native Dev.app"
