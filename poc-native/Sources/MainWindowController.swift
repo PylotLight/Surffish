@@ -14,7 +14,6 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     private var bramblePopover: NSPopover?
     private var installSheet: ExtensionInstallSheet?
     private var settingsViewController: BrowserSettingsViewController?
-    private var isShowingSettingsTab = false
     
     public init() {
         let window = NSWindow(
@@ -167,7 +166,6 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
             settingsViewController = controller
         }
         guard let settingsView = settingsViewController?.view else { return }
-        isShowingSettingsTab = true
         webContainerView.subviews.forEach { $0.isHidden = true }
         if settingsView.superview !== webContainerView {
             settingsView.translatesAutoresizingMaskIntoConstraints = false
@@ -185,7 +183,6 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     }
 
     private func showActiveBrowserTab() {
-        isShowingSettingsTab = false
         sidebarView.setSettingsTabActive(false)
         settingsViewController?.view.removeFromSuperview()
         if let active = TabManager.shared.activeTab {
