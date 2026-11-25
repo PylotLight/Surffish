@@ -109,11 +109,14 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
         isSidebarVisible = savedSidebarState
         sidebarLeadingConstraint.constant = savedSidebarState ? 0 : -sidebarWidth
 
-        // Restore persistent tabs; private browsing state is intentionally not restored.
+    }
+
+    public func restoreBrowserSession() {
+        // Called after SSH routing and native extensions are initialized.
         TabManager.shared.restoreSession()
         setupProgressObserver()
     }
-    
+
     private var progressObservation: NSKeyValueObservation?
     
     private func setupProgressObserver() {
