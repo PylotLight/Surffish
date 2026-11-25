@@ -4,21 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${ROOT_DIR}/poc-native/build"
 STAGING_DIR="${BUILD_DIR}/staging"
-BINARY="${STAGING_DIR}/SurffishNative"
-
 echo "==> Building Surffish Native for macOS 26 / Apple Silicon..."
 mkdir -p "${STAGING_DIR}"
-
-xcrun swiftc \
-  -parse-as-library \
-  -target arm64-apple-macosx26.0 \
-  -module-cache-path /tmp/swift-cache \
-  -framework AppKit \
-  -framework WebKit \
-  -framework Network \
-  -framework LocalAuthentication \
-  -o "${BINARY}" \
-  "${ROOT_DIR}"/poc-native/Sources/*.swift
 
 build_profile_app() {
     local profile="$1"
@@ -27,10 +14,26 @@ build_profile_app() {
     local app_dir="${BUILD_DIR}/${app_name}.app"
     local macos_dir="${app_dir}/Contents/MacOS"
     local resources_dir="${app_dir}/Contents/Resources"
+    local binary_name="$(printf '%s' "${app_name}" | /usr/bin/tr -d ' ')"
+    local binary="${STAGING_DIR}/${binary_name}"
 
     rm -rf "${app_dir}"
     mkdir -p "${macos_dir}" "${resources_dir}"
-    cp "${BINARY}" "${macos_dir}/Surffish"
+
+    # Compile each profile separately. Local Network privacy uses the main
+    # executable UUID as part of app identity; sharing one Mach-O between the
+    # production and development bundles makes that identity ambiguous.
+    xcrun swiftc \
+      -parse-as-library \
+      -target arm64-apple-macosx26.0 \
+      -module-cache-path /tmp/swift-cache \
+      -framework AppKit \
+      -framework WebKit \
+      -framework Network \
+      -framework LocalAuthentication \
+      -o "${binary}" \
+      "${ROOT_DIR}"/poc-native/Sources/*.swift
+    cp "${binary}" "${macos_dir}/Surffish"
     # Browser extensions are installed per profile at runtime; never bundle upstream extension code.
 
     cat > "${app_dir}/Contents/Info.plist" <<EOF
@@ -87,6 +90,14 @@ EOF
 
 build_profile_app "production" "Surffish" "com.surffish.app"
 build_profile_app "development" "Surffish Dev" "com.surffish.app.dev"
+
+production_uuid="$(/usr/bin/dwarfdump --uuid "${BUILD_DIR}/Surffish.app/Contents/MacOS/Surffish" | /usr/bin/awk 'NR == 1 { print $2 }')"
+development_uuid="$(/usr/bin/dwarfdump --uuid "${BUILD_DIR}/Surffish Dev.app/Contents/MacOS/Surffish" | /usr/bin/awk 'NR == 1 { print $2 }')"
+if [[ -z "${production_uuid}" || -z "${development_uuid}" || "${production_uuid}" == "${development_uuid}" ]]; then
+    echo "ERROR: Production and Development app executables must have distinct Mach-O UUIDs."
+    exit 1
+fi
+echo "==> Verified distinct executable UUIDs: production ${production_uuid}, development ${development_uuid}"
 
 echo "==> Both macOS 26 applications built successfully."
 echo "Production: ${BUILD_DIR}/Surffish.app"
