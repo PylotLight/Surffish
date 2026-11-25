@@ -9,8 +9,11 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     private var webContainerView: NSView!
     
     private var sidebarLeadingConstraint: NSLayoutConstraint!
+    private var sidebarWidthConstraint: NSLayoutConstraint!
     private var isSidebarVisible: Bool = true
-    private let sidebarWidth: CGFloat = 320.0
+    private var isSidebarHovered: Bool = false
+    private let sidebarWidth: CGFloat = 280.0
+    private let collapsedSidebarWidth: CGFloat = 64.0
     
     private var bramblePopover: NSPopover?
     private var installSheet: ExtensionInstallSheet?
@@ -29,6 +32,8 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
         window.hasShadow = true
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
+        window.titlebarDoubleClickBehavior = .zoom
+        window.isMovableByWindowBackground = true
         window.minSize = NSSize(width: 860, height: 540)
         
         super.init(window: window)
@@ -110,7 +115,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
             sidebarLeadingConstraint,
             sidebarView.topAnchor.constraint(equalTo: contentView.topAnchor),
             sidebarView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
-            sidebarView.widthAnchor.constraint(equalToConstant: sidebarWidth),
+            sidebarWidthConstraint,
             
             // Omnibox starts to right of sidebar and extends across top
             omniboxView.topAnchor.constraint(equalTo: contentView.topAnchor),
@@ -131,7 +136,9 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
         }
         let savedSidebarState = BrowserSettingsStore.shared.settings.showSidebarAtStartup
         isSidebarVisible = savedSidebarState
-        sidebarLeadingConstraint.constant = savedSidebarState ? 0 : -sidebarWidth
+        sidebarLeadingConstraint.constant = 0
+        sidebarWidthConstraint.constant = savedSidebarState ? sidebarWidth : collapsedSidebarWidth
+        sidebarView.setCollapsed(!savedSidebarState)
 
     }
 
@@ -299,16 +306,34 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     
     public func omniboxDidToggleSidebar() {
         isSidebarVisible.toggle()
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.22
-            context.allowsImplicitAnimation = true
-            sidebarLeadingConstraint.constant = isSidebarVisible ? 0 : -sidebarWidth
-            window?.contentView?.layoutSubtreeIfNeeded()
-        }
+        updateSidebarWidth(animated: true)
         var settings = BrowserSettingsStore.shared.settings
         settings.showSidebarAtStartup = isSidebarVisible
         BrowserSettingsStore.shared.update(settings)
         TabManager.shared.persistSession()
+    }
+
+    private func sidebarHoverChanged(_ hovering: Bool) {
+        isSidebarHovered = hovering
+        guard !isSidebarVisible else { return }
+        updateSidebarWidth(animated: true)
+    }
+
+    private func updateSidebarWidth(animated: Bool) {
+        let expanded = isSidebarVisible || isSidebarHovered
+        sidebarWidthConstraint.constant = expanded ? sidebarWidth : collapsedSidebarWidth
+        sidebarView.setCollapsed(!expanded)
+        let changes = { self.window?.contentView?.layoutSubtreeIfNeeded() }
+        if animated {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.34
+                context.timingFunction = CAMediaTimingFunction(controlPoints: 0.16, 1.0, 0.3, 1.0)
+                context.allowsImplicitAnimation = true
+                changes()
+            }
+        } else {
+            changes()
+        }
     }
     
     private func showExtensionInstallSheet() {
