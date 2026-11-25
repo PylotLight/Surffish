@@ -91,6 +91,8 @@ public final class BrowserSettingsViewController: NSViewController {
         diagnosticsView.textContainerInset = NSSize(width: 10, height: 8)
         diagnosticsView.isHorizontallyResizable = false
         diagnosticsView.isVerticallyResizable = true
+        diagnosticsView.minSize = NSSize(width: 0, height: 0)
+        diagnosticsView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         diagnosticsView.autoresizingMask = [.width]
         diagnosticsView.textContainer?.widthTracksTextView = true
         diagnosticsView.textContainer?.lineBreakMode = .byCharWrapping
@@ -143,6 +145,7 @@ public final class BrowserSettingsViewController: NSViewController {
             scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -34),
             scroll.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -24),
             stack.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor, constant: -4),
+            diagnosticsScroll.widthAnchor.constraint(equalTo: stack.widthAnchor),
             actionRow.widthAnchor.constraint(equalTo: stack.widthAnchor)
         ])
 
