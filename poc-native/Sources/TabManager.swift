@@ -111,8 +111,8 @@ public final class TabManager: NSObject, WKNavigationDelegate {
 
         WebKitProxyController.apply(port: SshTunnelManager.shared.browserProxyPort, to: configuration.websiteDataStore)
 
-        let webView = WKWebView(frame: .zero, configuration: configuration)
-        if #available(macOS 13.3, *) { webView.isInspectable = true }
+        let webView = InspectableWebView(frame: .zero, configuration: configuration)
+        webView.isInspectable = true
         webView.allowsBackForwardNavigationGestures = true
         webView.allowsMagnification = true
 
