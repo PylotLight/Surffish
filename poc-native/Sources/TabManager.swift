@@ -60,6 +60,7 @@ public protocol TabManagerDelegate: AnyObject {
     func tabManagerDidChangeActiveTab(to tab: TabItem)
 }
 
+@MainActor
 public final class TabManager: NSObject, WKNavigationDelegate {
     public static let shared = TabManager()
     public static var startPage: URL { BrowserSettingsStore.shared.settings.startPageURL }
