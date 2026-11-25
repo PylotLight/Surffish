@@ -20,6 +20,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Load Real Bramble and extensions
         let cwd = FileManager.default.currentDirectoryPath
         Task { [weak self] in
+            let settings = BrowserSettingsStore.shared.settings
+            await SshTunnelManager.shared.configure(enabled: settings.sshProxyEnabled, target: settings.sshHost)
             await WebExtensionManager.shared.loadDefaultExtensions(basePath: cwd)
             await MainActor.run {
                 self?.windowController?.restoreBrowserSession()
