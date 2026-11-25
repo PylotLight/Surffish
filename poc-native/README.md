@@ -49,6 +49,7 @@ Surffish creates one local SOCKS5 endpoint and uses OpenSSH dynamic forwarding (
 - Local endpoint: configurable port, default `1080`.
 - The SSH client binds to `127.0.0.1` by default. Optional LAN sharing binds to `0.0.0.0` so trusted LAN devices can use the same SOCKS5 endpoint.
 - macOS Local Network access is declared in the app bundle because SSH destinations may be on a private LAN. Allow the permission prompt when macOS asks; Production and Development profiles request access independently.
+- The build signs both app bundles with an installed Apple Development or Developer ID Application identity when available. Set `SURFFISH_CODESIGN_IDENTITY` to choose one explicitly. Ad-hoc signing is used only as a fallback; Apple recommends an Apple-issued identity so macOS can reliably track Local Network permission.
 - Browser routing and external application sharing can be enabled independently. When either is enabled, both use the same local dynamic SOCKS5 endpoint.
 - Use `socks5h://127.0.0.1:1080` in other applications when you want hostnames sent through the SOCKS5 connection.
 - LAN exposure has no added SOCKS authentication. Use a trusted network and firewall.
