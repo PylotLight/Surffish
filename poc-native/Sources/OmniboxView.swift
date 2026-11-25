@@ -160,7 +160,20 @@ public final class OmniboxView: NSVisualEffectView, NSTextFieldDelegate {
         addSubview(button)
     }
 
+    public func refreshExtensionButton() {
+        let icon = WebExtensionManager.shared.brambleIcon
+        brambleBtn.image = (icon ?? NSImage(systemSymbolName: "puzzlepiece.extension", accessibilityDescription: "Extensions"))?
+            .copy() as? NSImage
+        brambleBtn.imageScaling = .scaleProportionallyDown
+        brambleBtn.contentTintColor = icon == nil ? .secondaryLabelColor : nil
+        brambleBtn.title = ""
+        brambleBtn.toolTip = WebExtensionManager.shared.brambleContext == nil
+            ? "Install Extensions"
+            : "Bramble Password Manager"
+    }
+
     public func updateForTab(_ tab: TabItem) {
+        refreshExtensionButton()
         backBtn.isEnabled = tab.webView.canGoBack
         forwardBtn.isEnabled = tab.webView.canGoForward
 
