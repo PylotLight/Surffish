@@ -160,6 +160,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
         settingsWindowController?.window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
+    @objc public func menuOpenDeveloperTools() { DeveloperConsole.shared.show() }
     @objc public func menuTestAdBlock() { _ = AdBlockManager.shared.toggle() }
     @objc public func menuTestInstallExtension() { showExtensionInstallSheet() }
     @objc public func menuTestTouchID() { runTouchIDTest() }
