@@ -133,6 +133,26 @@ public final class SshTunnelManager {
             let port = configuredPort
             proxyPort = port
 
+            // Trigger Local Network privacy from the Surffish process itself.
+            // A child /usr/bin/ssh process is not a reliable way to attribute the
+            // macOS permission request to this app.
+            if let endpoint = try Self.resolveDirectPrivateEndpoint(target) {
+                appendDiagnostics("Checking this app's Local Network access to \(endpoint.host):\(endpoint.port)…\n")
+                do {
+                    try await Self.preflightLocalNetworkAccess(host: endpoint.host, port: endpoint.port)
+                    appendDiagnostics("Local Network preflight succeeded.\n")
+                } catch {
+                    updateStatus("Local Network access check failed: \(error.localizedDescription)")
+                    appendDiagnostics("Local Network preflight failed: \(error.localizedDescription)\n")
+                    DeveloperConsole.shared.record(
+                        level: "ERROR",
+                        source: "SSH",
+                        message: "Surffish could not open a direct local-network connection to \(endpoint.host):\(endpoint.port): \(error.localizedDescription)"
+                    )
+                    return
+                }
+            }
+
             // Install the proxy before launching SSH. If the tunnel fails, WebKit continues
             // pointing at this loopback endpoint and cannot silently fall back to a direct route.
             applyProxyToBrowserStores(port: browserEnabled ? port : nil)
@@ -369,6 +389,95 @@ public final class SshTunnelManager {
             return value?.isEmpty == false ? value : nil
         } catch {
             return nil
+        }
+    }
+
+    private static func resolveDirectPrivateEndpoint(_ target: String) throws -> (host: String, port: UInt16)? {
+        let command = Process()
+        command.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
+        command.arguments = ["-G", "--", target]
+        command.environment = sshEnvironment()
+        let output = Pipe()
+        command.standardOutput = output
+        command.standardError = FileHandle.nullDevice
+        try command.run()
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        command.waitUntilExit()
+        guard command.terminationStatus == 0,
+              let text = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+
+        var values: [String: String] = [:]
+        for line in text.split(separator: "\n") {
+            let parts = line.split(maxSplits: 1, whereSeparator: \.isWhitespace)
+            guard parts.count == 2 else { continue }
+            values[String(parts[0]).lowercased()] = String(parts[1])
+        }
+
+        // Do not probe through a jump host or proxy command; OpenSSH owns those routes.
+        guard (values["proxyjump"] ?? "none").lowercased() == "none",
+              (values["proxycommand"] ?? "none").lowercased() == "none",
+              let host = values["hostname"], !host.isEmpty,
+              let portValue = values["port"].flatMap(UInt16.init), portValue > 0 else {
+            return nil
+        }
+
+        let octets = host.split(separator: ".").compactMap { UInt8($0) }
+        guard octets.count == 4 else { return nil }
+        let isPrivate =
+            octets[0] == 10 ||
+            (octets[0] == 172 && (16...31).contains(octets[1])) ||
+            (octets[0] == 192 && octets[1] == 168) ||
+            (octets[0] == 169 && octets[1] == 254)
+        return isPrivate ? (host, portValue) : nil
+    }
+
+    private static func preflightLocalNetworkAccess(host: String, port: UInt16) async throws {
+        guard let endpointPort = NWEndpoint.Port(rawValue: port) else {
+            throw NSError(domain: "SurffishSSH", code: 1, userInfo: [
+                NSLocalizedDescriptionKey: "Invalid SSH destination port \(port)."
+            ])
+        }
+        let connection = NWConnection(
+            to: .hostPort(host: NWEndpoint.Host(host), port: endpointPort),
+            using: .tcp
+        )
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let lock = NSLock()
+            var completed = false
+            let finish: (Error?) -> Void = { error in
+                lock.lock()
+                guard !completed else { lock.unlock(); return }
+                completed = true
+                lock.unlock()
+                connection.cancel()
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume()
+                }
+            }
+            connection.stateUpdateHandler = { state in
+                switch state {
+                case .ready:
+                    finish(nil)
+                case .failed(let error):
+                    finish(error)
+                case .cancelled:
+                    finish(NSError(domain: "SurffishSSH", code: 2, userInfo: [
+                        NSLocalizedDescriptionKey: "The local-network connection was cancelled."
+                    ]))
+                default:
+                    break
+                }
+            }
+            connection.start(queue: .global(qos: .utility))
+            DispatchQueue.global().asyncAfter(deadline: .now() + 6) {
+                finish(NSError(domain: "SurffishSSH", code: 3, userInfo: [
+                    NSLocalizedDescriptionKey: "Timed out waiting for macOS Local Network access to \(host):\(port)."
+                ]))
+            }
         }
     }
 
