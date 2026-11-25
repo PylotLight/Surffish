@@ -149,6 +149,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
         webContainerView.addSubview(findBarView)
 
         let savedSettings = BrowserSettingsStore.shared.settings
+        BrowserLibraryStore.shared.enforceHistoryRetention(savedSettings.historyRetention)
         sidebarWidth = CGFloat(savedSettings.sidebarWidth)
         isSidebarPinned = savedSettings.sidebarPinned
         isSidebarVisible = savedSettings.showSidebarAtStartup
@@ -532,6 +533,8 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     }
 
     private func settingsDidChange(_ settings: BrowserSettings) {
+        BrowserLibraryStore.shared.enforceHistoryRetention(settings.historyRetention)
+        sidebarView.reloadTabs()
         isSidebarVisible = settings.showSidebarAtStartup
         isSidebarPinned = settings.sidebarPinned
         sidebarWidth = CGFloat(settings.sidebarWidth)

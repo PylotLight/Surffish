@@ -140,6 +140,16 @@ private final class SidebarViewModel {
         return true
     }
 
+    func reorderBookmark(draggedID: String, before target: BrowserBookmark) -> Bool {
+        guard contentMode == .tabs || contentMode == .bookmarks,
+              let id = UUID(uuidString: draggedID),
+              let moving = bookmarks.first(where: { $0.id == id }),
+              moving.isPinned == target.isPinned,
+              BrowserLibraryStore.shared.moveBookmark(id: id, beforeID: target.id) else { return false }
+        refresh()
+        return true
+    }
+
     init() { refresh() }
 
     func refresh() {
@@ -284,7 +294,6 @@ private struct NativeSidebarRootView: View {
             Spacer(minLength: 6)
 
             railButton("New tab", symbol: "plus", action: { model.delegate?.sidebarDidCreateNewTab() })
-            railButton("Settings", symbol: "gearshape", action: { model.delegate?.sidebarDidOpenSettings() })
             railButton(
                 model.isPinned ? "Auto-hide sidebar" : "Keep sidebar open",
                 symbol: model.isPinned ? "pin.fill" : "pin",
@@ -611,6 +620,11 @@ private struct NativeSidebarRootView: View {
                     .buttonStyle(.plain)
                     .help(bookmark.title.isEmpty ? bookmark.url : bookmark.title)
                     .accessibilityLabel(bookmark.title.isEmpty ? "Pinned site" : bookmark.title)
+                    .draggable(bookmark.id.uuidString)
+                    .dropDestination(for: String.self) { items, _ in
+                        guard let draggedID = items.first else { return false }
+                        return model.reorderBookmark(draggedID: draggedID, before: bookmark)
+                    }
                 }
                 ForEach(filteredPinnedTabs) { tab in
                     Button {
@@ -751,6 +765,12 @@ private struct NativeSidebarRootView: View {
             symbol: bookmark.isPinned ? "pin.fill" : "bookmark.fill",
             action: { if let url = URL(string: bookmark.url) { model.delegate?.sidebarDidOpenLibraryURL(url) } }
         )
+        .draggable(bookmark.id.uuidString)
+        .dropDestination(for: String.self) { items, _ in
+            guard model.bookmarksSortOrder == .defaultOrder,
+                  let draggedID = items.first else { return false }
+            return model.reorderBookmark(draggedID: draggedID, before: bookmark)
+        }
         .contextMenu {
             Button(bookmark.isPinned ? "Remove from Pinned Sites" : "Pin to Pinned Sites") {
                 model.delegate?.sidebarDidToggleBookmarkPin(id: bookmark.id)

@@ -51,6 +51,7 @@ public final class BrowserSettingsModel {
     public var newQuickLinkTitle = ""
     public var newQuickLinkURL = ""
     public var adBlockingEnabled: Bool
+    public var historyRetention: HistoryRetention
     public var sshProxyEnabled: Bool
     public var sshHost: String
     public var sshProxyShareEnabled: Bool
@@ -87,6 +88,7 @@ public final class BrowserSettingsModel {
         newTabClockSize = settings.newTabClockSize
         customQuickLinks = settings.customQuickLinks
         adBlockingEnabled = settings.adBlockingEnabled
+        historyRetention = settings.historyRetention
         sshProxyEnabled = settings.sshProxyEnabled
         sshHost = settings.sshHost
         sshProxyShareEnabled = settings.sshProxyShareEnabled
@@ -139,6 +141,17 @@ public final class BrowserSettingsModel {
         customQuickLinks.removeAll { $0.id == id }
     }
 
+    public func canMoveCustomQuickLink(id: UUID, by offset: Int) -> Bool {
+        guard let index = customQuickLinks.firstIndex(where: { $0.id == id }) else { return false }
+        return customQuickLinks.indices.contains(index + offset)
+    }
+
+    public func moveCustomQuickLink(id: UUID, by offset: Int) {
+        guard canMoveCustomQuickLink(id: id, by: offset),
+              let index = customQuickLinks.firstIndex(where: { $0.id == id }) else { return }
+        customQuickLinks.swapAt(index, index + offset)
+    }
+
     public func searchSSHHosts() {
         guard !isSearchingSSHHosts else { return }
         isSearchingSSHHosts = true
@@ -183,6 +196,7 @@ public final class BrowserSettingsModel {
         next.newTabUses24HourClock = newTabUses24HourClock
         next.newTabShowsDate = newTabShowsDate
         next.newTabClockSize = newTabClockSize
+        next.historyRetention = historyRetention
         guard customQuickLinks.count <= 12 else {
             showAlert(title: "Too many shortcuts", message: "New Tab supports up to 12 custom shortcuts.")
             return
@@ -316,6 +330,7 @@ public struct BrowserSettingsView: View {
             .init(id: "newtab-clock", title: "New Tab clock", detail: "Choose 12- or 24-hour time, date visibility and clock size", section: .appearance, terms: "clock time 12 24 hour date size appearance new tab"),
             .init(id: "newtab-links", title: "New Tab shortcuts", detail: "Choose a source or manage custom shortcuts", section: .appearance, terms: "quick links favorites bookmarks pinned recent custom new tab"),
             .init(id: "ad-blocking", title: "Advertising and tracking", detail: "Enable the built-in WebKit content rules", section: .privacy, terms: "privacy ad blocker tracking content rules"),
+            .init(id: "history-retention", title: "History retention", detail: "Automatically remove profile history older than the selected limit", section: .privacy, terms: "privacy history retention delete clear 30 90 days year"),
             .init(id: "site-data", title: "Website data", detail: "Clear cookies, caches and storage for this profile", section: .privacy, terms: "privacy cookies cache storage clear site data"),
             .init(id: "extensions", title: "Extensions", detail: "Install or remove profile extensions", section: .extensions, terms: "extensions add install remove webkit bramble"),
             .init(id: "ssh-route", title: "Browser proxy routing", detail: "Route browser traffic through the SSH tunnel", section: .connection, terms: "network proxy ssh socks5 route browser"),
@@ -615,6 +630,24 @@ public struct BrowserSettingsView: View {
                                     .textFieldStyle(.roundedBorder)
                                     .font(.system(size: 11, design: .monospaced))
                             }
+                            VStack(spacing: 3) {
+                                Button {
+                                    model.moveCustomQuickLink(id: link.id, by: -1)
+                                } label: {
+                                    Image(systemName: "chevron.up")
+                                }
+                                .disabled(!model.canMoveCustomQuickLink(id: link.id, by: -1))
+                                .help("Move shortcut up")
+                                .accessibilityLabel("Move \(link.title) up")
+                                Button {
+                                    model.moveCustomQuickLink(id: link.id, by: 1)
+                                } label: {
+                                    Image(systemName: "chevron.down")
+                                }
+                                .disabled(!model.canMoveCustomQuickLink(id: link.id, by: 1))
+                                .help("Move shortcut down")
+                                .accessibilityLabel("Move \(link.title) down")
+                            }
                             Button(role: .destructive) {
                                 model.removeCustomQuickLink(id: link.id)
                             } label: {
@@ -658,6 +691,15 @@ public struct BrowserSettingsView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Toggle("Block common advertising and tracking requests", isOn: $model.adBlockingEnabled)
                     Text("The native blocker uses a small built-in WebKit rule set. It is not equivalent to Electron’s full filter-list and scriptlet coverage.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Picker("Keep history for", selection: $model.historyRetention) {
+                        ForEach(HistoryRetention.allCases) { retention in
+                            Text(retention.displayName).tag(retention)
+                        }
+                    }
+                    Text("Older profile history is removed when you save and at startup. The default is Never; bookmarks and Reading List are not affected.")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

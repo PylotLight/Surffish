@@ -36,3 +36,23 @@ test("native library panels count matching rows and offer sorting without changi
   assert.match(store, /case history, bookmarks, readingList/);
   assert.doesNotMatch(store, /sortOrder/);
 });
+
+test("bookmark order persists and drag reorder stays inside the pinned partition", () => {
+  const sidebar = read("poc-native/Sources/SidebarView.swift");
+  const store = read("poc-native/Sources/BrowserLibraryStore.swift");
+  assert.match(store, /bookmarks = saved\.bookmarks/);
+  assert.match(store, /func moveBookmark\(id: UUID, beforeID targetID: UUID\)/);
+  assert.match(store, /source\.isPinned == target\.isPinned/);
+  assert.match(store, /orderedPartition\.insert\(moving, at: destination\)/);
+  assert.match(
+    sidebar,
+    /func reorderBookmark\(draggedID: String, before target: BrowserBookmark\)/,
+  );
+  assert.match(sidebar, /\.draggable\(bookmark\.id\.uuidString\)/);
+  assert.match(sidebar, /\.dropDestination\(for: String\.self\)/);
+  assert.match(sidebar, /model\.bookmarksSortOrder == \.defaultOrder/);
+  assert.match(
+    sidebar,
+    /BrowserLibraryStore\.shared\.moveBookmark\(id: id, beforeID: target\.id\)/,
+  );
+});

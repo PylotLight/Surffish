@@ -104,7 +104,8 @@ public final class BrowserLibraryStore {
         if let data = try? Data(contentsOf: fileURL),
            let saved = try? decoder.decode(Snapshot.self, from: data) {
             history = saved.history.sorted { $0.visitedAt > $1.visitedAt }
-            bookmarks = saved.bookmarks.sorted { $0.createdAt < $1.createdAt }
+            // Preserve the saved sequence so manual bookmark order survives relaunches.
+            bookmarks = saved.bookmarks
             readingList = saved.readingList.sorted { $0.addedAt > $1.addedAt }
         }
     }
@@ -144,6 +145,30 @@ public final class BrowserLibraryStore {
     public func isBookmarked(url: URL?) -> Bool {
         guard let url else { return false }
         return bookmarks.contains { $0.url == url.absoluteString }
+    }
+
+    @discardableResult
+    public func moveBookmark(id: UUID, beforeID targetID: UUID) -> Bool {
+        guard id != targetID,
+              let source = bookmarks.first(where: { $0.id == id }),
+              let target = bookmarks.first(where: { $0.id == targetID }),
+              source.isPinned == target.isPinned else { return false }
+
+        let partitionIndices = bookmarks.indices.filter { bookmarks[$0].isPinned == source.isPinned }
+        guard let sourceOffset = partitionIndices.firstIndex(where: { bookmarks[$0].id == id }),
+              partitionIndices.contains(where: { bookmarks[$0].id == targetID }) else { return false }
+
+        var orderedPartition = partitionIndices.map { bookmarks[$0] }
+        let moving = orderedPartition.remove(at: sourceOffset)
+        guard let destination = orderedPartition.firstIndex(where: { $0.id == targetID }) else { return false }
+        orderedPartition.insert(moving, at: destination)
+        guard orderedPartition.map(\.id) != partitionIndices.map({ bookmarks[$0].id }) else { return false }
+
+        for (index, bookmark) in zip(partitionIndices, orderedPartition) {
+            bookmarks[index] = bookmark
+        }
+        persist()
+        return true
     }
 
     public func removeBookmark(id: UUID) {
@@ -210,6 +235,15 @@ public final class BrowserLibraryStore {
             guard let host = URL(string: entry.url)?.host?.lowercased() else { return false }
             return host == normalizedSite || host.hasSuffix("." + normalizedSite)
         }
+        persist()
+    }
+
+    public func enforceHistoryRetention(_ retention: HistoryRetention, now: Date = Date(), calendar: Calendar = .current) {
+        guard let days = retention.retentionDays,
+              let cutoff = calendar.date(byAdding: .day, value: -days, to: now) else { return }
+        let retained = history.filter { $0.visitedAt >= cutoff }
+        guard retained.count != history.count else { return }
+        history = retained
         persist()
     }
 

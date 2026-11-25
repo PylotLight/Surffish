@@ -24,6 +24,8 @@ test("native sidebar has one collapse affordance and a persistent SwiftUI compac
   assert.match(toolbar, /omniboxDidShowTabs/);
   assert.match(window, /sidebarView\.showTabs\(\)/);
   assert.match(sidebar, /pinnedClusterButton/);
+  assert.doesNotMatch(sidebar, /railButton\("Settings"/);
+  assert.match(sidebar, /footerButton\("Settings"/);
   assert.match(sidebar, /matchedGeometryEffect/);
   assert.match(sidebar, /onFocusChange/);
   assert.match(window, /sidebarFocusChanged/);
@@ -332,4 +334,21 @@ test("expanded sidebar content follows the live resizable shell width", () => {
     window,
     /sidebarView\.setPanelWidth\(shellLayoutModel\.sidebarWidth\)/,
   );
+});
+
+test("New Tab shortcuts can be reordered accessibly and the saved order is rendered", () => {
+  const settings = read("poc-native/Sources/BrowserSettingsView.swift");
+  const page = read("poc-native/Sources/BrowserNewTabSchemeHandler.swift");
+  assert.match(
+    settings,
+    /func canMoveCustomQuickLink\(id: UUID, by offset: Int\)/,
+  );
+  assert.match(
+    settings,
+    /func moveCustomQuickLink\(id: UUID, by offset: Int\)/,
+  );
+  assert.match(settings, /customQuickLinks\.swapAt\(index, index \+ offset\)/);
+  assert.ok(settings.includes(String.raw`Move \(link.title) up`));
+  assert.ok(settings.includes(String.raw`Move \(link.title) down`));
+  assert.match(page, /settings\.customQuickLinks\.prefix\(12\)/);
 });

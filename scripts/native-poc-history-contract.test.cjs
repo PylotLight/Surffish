@@ -59,3 +59,40 @@ test("individual entries and exact URLs can be removed; site clearing matches ho
   assert.doesNotMatch(sidebar, /WKWebsiteDataStore/);
   assert.doesNotMatch(store, /WKWebsiteDataStore/);
 });
+
+test("history retention is profile-local, opt-in, persisted, and enforced on save and startup", () => {
+  const store = read("poc-native/Sources/BrowserSettingsStore.swift");
+  const library = read("poc-native/Sources/BrowserLibraryStore.swift");
+  const settings = read("poc-native/Sources/BrowserSettingsView.swift");
+  const window = read("poc-native/Sources/MainWindowController.swift");
+  assert.match(store, /enum HistoryRetention: String, CaseIterable, Codable/);
+  assert.match(store, /case never/);
+  assert.match(store, /case thirtyDays/);
+  assert.match(store, /case ninetyDays/);
+  assert.match(store, /case oneYear/);
+  assert.match(
+    store,
+    /decodeIfPresent\(HistoryRetention\.self, forKey: \.historyRetention\) \?\? \.never/,
+  );
+  assert.match(store, /historyRetention: \.never/);
+  assert.match(
+    library,
+    /func enforceHistoryRetention\(_ retention: HistoryRetention/,
+  );
+  assert.match(
+    library,
+    /calendar\.date\(byAdding: \.day, value: -days, to: now\)/,
+  );
+  assert.match(library, /history\.filter \{ \$0\.visitedAt >= cutoff \}/);
+  assert.match(
+    settings,
+    /Picker\("Keep history for", selection: \$model\.historyRetention\)/,
+  );
+  assert.match(settings, /next\.historyRetention = historyRetention/);
+  assert.match(settings, /history-retention/);
+  assert.match(
+    window,
+    /enforceHistoryRetention\(savedSettings\.historyRetention\)/,
+  );
+  assert.match(window, /enforceHistoryRetention\(settings\.historyRetention\)/);
+});

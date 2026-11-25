@@ -95,6 +95,33 @@ public enum NewTabClockSize: String, CaseIterable, Codable, Identifiable, Hashab
     }
 }
 
+public enum HistoryRetention: String, CaseIterable, Codable, Identifiable, Hashable {
+    case never
+    case thirtyDays
+    case ninetyDays
+    case oneYear
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .never: return "Never"
+        case .thirtyDays: return "30 days"
+        case .ninetyDays: return "90 days"
+        case .oneYear: return "1 year"
+        }
+    }
+
+    public var retentionDays: Int? {
+        switch self {
+        case .never: return nil
+        case .thirtyDays: return 30
+        case .ninetyDays: return 90
+        case .oneYear: return 365
+        }
+    }
+}
+
 public struct BrowserNewTabQuickLink: Codable, Identifiable, Hashable {
     public var id: UUID
     public var title: String
@@ -121,6 +148,7 @@ public struct BrowserSettings: Codable {
     public var sshProxyShareEnabled: Bool
     public var sshProxyBindAddress: String
     public var adBlockingEnabled: Bool
+    public var historyRetention: HistoryRetention
     public var newTabTheme: NewTabTheme
     public var newTabSiteSource: NewTabSiteSource
     public var customQuickLinks: [BrowserNewTabQuickLink]
@@ -130,7 +158,7 @@ public struct BrowserSettings: Codable {
 
     private enum CodingKeys: String, CodingKey {
         case version, searchEngine, startPage, restoreSession, showSidebarAtStartup, sidebarPinned, sidebarWidth
-        case sshProxyEnabled, sshHost, sshProxyPort, sshProxyShareEnabled, sshProxyBindAddress, adBlockingEnabled
+        case sshProxyEnabled, sshHost, sshProxyPort, sshProxyShareEnabled, sshProxyBindAddress, adBlockingEnabled, historyRetention
         case newTabTheme, newTabSiteSource, customQuickLinks
         case newTabUses24HourClock, newTabShowsDate, newTabClockSize
     }
@@ -149,6 +177,7 @@ public struct BrowserSettings: Codable {
         sshProxyShareEnabled: Bool = false,
         sshProxyBindAddress: String = "127.0.0.1",
         adBlockingEnabled: Bool = false,
+        historyRetention: HistoryRetention = .never,
         newTabTheme: NewTabTheme = .midnight,
         newTabSiteSource: NewTabSiteSource = .automatic,
         customQuickLinks: [BrowserNewTabQuickLink] = [],
@@ -169,6 +198,7 @@ public struct BrowserSettings: Codable {
         self.sshProxyShareEnabled = sshProxyShareEnabled
         self.sshProxyBindAddress = sshProxyBindAddress
         self.adBlockingEnabled = adBlockingEnabled
+        self.historyRetention = historyRetention
         self.newTabTheme = newTabTheme
         self.newTabSiteSource = newTabSiteSource
         self.customQuickLinks = customQuickLinks
@@ -193,6 +223,7 @@ public struct BrowserSettings: Codable {
         sshProxyShareEnabled = try values.decodeIfPresent(Bool.self, forKey: .sshProxyShareEnabled) ?? false
         sshProxyBindAddress = try values.decodeIfPresent(String.self, forKey: .sshProxyBindAddress) ?? "127.0.0.1"
         adBlockingEnabled = try values.decodeIfPresent(Bool.self, forKey: .adBlockingEnabled) ?? false
+        historyRetention = try values.decodeIfPresent(HistoryRetention.self, forKey: .historyRetention) ?? .never
         newTabTheme = try values.decodeIfPresent(NewTabTheme.self, forKey: .newTabTheme) ?? .midnight
         newTabSiteSource = try values.decodeIfPresent(NewTabSiteSource.self, forKey: .newTabSiteSource) ?? .automatic
         customQuickLinks = try values.decodeIfPresent([BrowserNewTabQuickLink].self, forKey: .customQuickLinks) ?? []
@@ -218,6 +249,7 @@ public struct BrowserSettings: Codable {
         sshProxyShareEnabled: false,
         sshProxyBindAddress: "127.0.0.1",
         adBlockingEnabled: false,
+        historyRetention: .never,
         newTabTheme: .midnight,
         newTabSiteSource: .automatic,
         customQuickLinks: [],
