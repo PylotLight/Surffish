@@ -9,7 +9,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     
     private var sidebarLeadingConstraint: NSLayoutConstraint!
     private var isSidebarVisible: Bool = true
-    private let sidebarWidth: CGFloat = 260.0
+    private let sidebarWidth: CGFloat = 320.0
     
     private var bramblePopover: NSPopover?
     private var installSheet: ExtensionInstallSheet?
@@ -94,12 +94,12 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
             omniboxView.topAnchor.constraint(equalTo: contentView.topAnchor),
             omniboxView.leadingAnchor.constraint(equalTo: sidebarView.trailingAnchor),
             omniboxView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            omniboxView.heightAnchor.constraint(equalToConstant: 46),
+            omniboxView.heightAnchor.constraint(equalToConstant: 50),
             
             // Web view container sits below Omnibox
-            webContainerView.leadingAnchor.constraint(equalTo: sidebarView.trailingAnchor, constant: 6),
+            webContainerView.leadingAnchor.constraint(equalTo: sidebarView.trailingAnchor, constant: 8),
             webContainerView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -8),
-            webContainerView.topAnchor.constraint(equalTo: omniboxView.bottomAnchor, constant: 4),
+            webContainerView.topAnchor.constraint(equalTo: omniboxView.bottomAnchor, constant: 8),
             webContainerView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -8),
         ])
         
