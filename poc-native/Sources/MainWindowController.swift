@@ -13,7 +13,8 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     
     private var bramblePopover: NSPopover?
     private var installSheet: ExtensionInstallSheet?
-    private var settingsWindowController: BrowserSettingsWindowController?
+    private var settingsViewController: BrowserSettingsViewController?
+    private var isShowingSettingsTab = false
     
     public init() {
         let window = NSWindow(
@@ -155,10 +156,42 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     @objc public func menuToggleSidebar() { omniboxDidToggleSidebar() }
     @objc public func menuFocusAddress() { omniboxView.focusAddressField() }
     @objc public func menuOpenSettings() {
-        if settingsWindowController == nil { settingsWindowController = BrowserSettingsWindowController() }
-        settingsWindowController?.showWindow(nil)
-        settingsWindowController?.window?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        showSettingsTab()
+    }
+
+    private func showSettingsTab() {
+        guard let webContainerView else { return }
+        if settingsViewController == nil {
+            let controller = BrowserSettingsViewController()
+            controller.onClose = { [weak self] in self?.showActiveBrowserTab() }
+            settingsViewController = controller
+        }
+        guard let settingsView = settingsViewController?.view else { return }
+        isShowingSettingsTab = true
+        webContainerView.subviews.forEach { $0.isHidden = true }
+        if settingsView.superview !== webContainerView {
+            settingsView.translatesAutoresizingMaskIntoConstraints = false
+            webContainerView.addSubview(settingsView)
+            NSLayoutConstraint.activate([
+                settingsView.topAnchor.constraint(equalTo: webContainerView.topAnchor),
+                settingsView.leadingAnchor.constraint(equalTo: webContainerView.leadingAnchor),
+                settingsView.trailingAnchor.constraint(equalTo: webContainerView.trailingAnchor),
+                settingsView.bottomAnchor.constraint(equalTo: webContainerView.bottomAnchor)
+            ])
+        }
+        settingsView.isHidden = false
+        window?.title = "Settings — Surffish · \(BrowserProfile.current.displayName)"
+        sidebarView.reloadTabs()
+    }
+
+    private func showActiveBrowserTab() {
+        isShowingSettingsTab = false
+        settingsViewController?.view.removeFromSuperview()
+        if let active = TabManager.shared.activeTab {
+            displayBrowserTab(active)
+        }
+        window?.title = "Surffish — \(BrowserProfile.current.displayName)"
+        sidebarView.reloadTabs()
     }
     @objc public func menuOpenDeveloperTools() { DeveloperConsole.shared.show() }
     @objc public func menuTestAdBlock() { _ = AdBlockManager.shared.toggle() }
@@ -184,20 +217,27 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     }
     
     public func tabManagerDidChangeActiveTab(to tab: TabItem) {
+        isShowingSettingsTab = false
+        settingsViewController?.view.removeFromSuperview()
+        displayBrowserTab(tab)
+        window?.title = "Surffish — \(BrowserProfile.current.displayName)"
+    }
+
+    private func displayBrowserTab(_ tab: TabItem) {
         progressObservation?.invalidate()
         progressObservation = nil
         webContainerView.subviews.forEach { $0.removeFromSuperview() }
-        
+
         tab.webView.translatesAutoresizingMaskIntoConstraints = false
         webContainerView.addSubview(tab.webView)
-        
+
         NSLayoutConstraint.activate([
             tab.webView.topAnchor.constraint(equalTo: webContainerView.topAnchor),
             tab.webView.leadingAnchor.constraint(equalTo: webContainerView.leadingAnchor),
             tab.webView.trailingAnchor.constraint(equalTo: webContainerView.trailingAnchor),
             tab.webView.bottomAnchor.constraint(equalTo: webContainerView.bottomAnchor),
         ])
-        
+
         setupProgressObserver()
         omniboxView.updateForTab(tab)
         sidebarView.reloadTabs()
