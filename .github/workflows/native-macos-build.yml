@@ -11,6 +11,9 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
 
+      - name: Check native browser UI contracts
+        run: node --test scripts/native-poc-ui-contract.test.cjs
+
       - name: Build native browser
         run: |
           chmod +x scripts/build-native-poc.sh

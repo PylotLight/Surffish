@@ -21,12 +21,12 @@ Each profile owns its settings, session, bookmarks/history/database, installed e
 
 Do not implement multiple named upstream proxy profiles. The native MVP has one managed SSH destination and one SOCKS5 endpoint:
 
-- Native OpenSSH manages SSH authentication and a local TCP forward (`-L`) to the existing NAS SOCKS5 daemon.
-- The local forwarded endpoint has a user-configurable port (default 1080); SOCKS5 itself is served by the NAS daemon.
+- Native OpenSSH manages SSH authentication and a local dynamic SOCKS5 forward (`-D`); the SSH host is the exit point.
+- The local endpoint has a user-configurable port (default 1080); OpenSSH's dynamic forward (`-D`) provides the SOCKS5 service.
 - Browser routing and external-client availability are independently selectable.
 - Loopback is the default listener address.
 - Optional LAN binding is explicitly opt-in and carries a no-authentication warning.
-- SOCKS5 clients speak directly to the NAS daemon through the SSH forward and use remote DNS (for example, `socks5h://127.0.0.1:1080`).
+- SOCKS5 clients use remote hostname resolution through the SSH connection (for example, `socks5h://127.0.0.1:1080`); the SSH host is the network exit point.
 - One browser-wide managed proxy is the MVP. Later routing may support direct bypass rules and per-site selection between Direct and this one managed endpoint, but not a catalogue of upstream proxies.
 
 ## Current native implementation
@@ -41,18 +41,31 @@ Do not implement multiple named upstream proxy profiles. The native MVP has one 
 - Separate persistent WebKit website data store identifiers for Development and Production.
 - Profile-isolated extension installation directories and Bramble lookup.
 - Profile-specific Bramble Touch ID PRF secrets in Keychain, preventing Development and Production from sharing the same biometric secret.
-- Native OpenSSH local forwarding (`-L`) to the existing NAS SOCKS5 daemon, with launchd SSH-agent discovery, Homebrew PATH support, process monitoring, diagnostics and reconnect backoff.
-- WebKit SOCKSv5 proxy configuration with proxy failover disabled, pointing to the same local SSH-forwarded NAS SOCKS endpoint used by external applications.
+- Native OpenSSH dynamic forwarding (`-D`) with launchd SSH-agent discovery, Homebrew PATH support, process monitoring, diagnostics and reconnect backoff.
+- WebKit SOCKSv5 proxy configuration with proxy failover disabled, pointing to the same local SSH-managed SOCKS endpoint used by external applications.
 - Independent browser proxy and external SOCKS service settings.
-- Configurable local listen port and NAS SOCKS host/port; defaults are local 1080 and NAS `127.0.0.1:1080`.
+- Configurable local listen port; the default is `127.0.0.1:1080`.
 - Loopback-only listener by default; optional `0.0.0.0` binding when external sharing is enabled.
 - Copyable `socks5h://127.0.0.1:<port>` endpoint.
+- Profile-local persistent bookmarks and browsing history, excluding private-tab navigations.
+- Native Settings pages for General, Privacy, Extensions, Connection and About, with saved controls for the supported behaviors.
+- One sidebar collapse control in the toolbar; sidebar tabs, history and bookmarks surfaces with a separate pinned-tab strip.
 - macOS 26 arm64 build workflow.
+
+### Implementation status for the native parity pass
+
+- **Implemented:** the single toolbar sidebar toggle; a glass-backed sidebar with Tabs, History and Bookmarks panels; profile-local bookmark/history storage; native Settings pages for General, Privacy, Extensions, Connection and About; a persisted WebKit content-rule toggle; and profile-scoped website-data clearing.
+- **Incomplete:** full Electron settings parity, downloads, reading list, true lazy session restoration, window geometry/multiple windows, find-in-page, robust error/crash UI, site permission/certificate management, production filter-list updates, and the broader M1–M6 feature inventory below. Settings expose only controls backed by native behavior; they do not imply the remaining categories are done.
+- **Obsolete roadmap assumptions:** references to forwarding `-L` traffic to a separately managed NAS SOCKS daemon, configuring a NAS SOCKS host/port, or treating that NAS daemon as the exit are stale. The implementation uses `ssh -D`; the SSH host is the exit point. Do not reintroduce the old model without an explicit product decision.
+- **Runtime QA boundary:** this Linux environment cannot launch AppKit/WebKit. The macOS 26 GitHub Actions build can compile the app; interactive browser QA still needs a macOS 26+ machine. The tunnel is mostly working in the POC; remaining SSH-host, sleep/wake, LAN-client and tunnel-drop acceptance is separate follow-up, not a blocker for this UI parity pass.
+- **WebKit compatibility limits:** Chrome-only extension APIs and Chromium DevTools request interception/process metrics are not assumed to exist. Record each incompatibility and design native alternatives; do not label them complete based on a Settings control or a successful compile.
 
 ### Still required for the native networking MVP
 
+The POC's SSH path is mostly working. The remaining checks below are acceptance/observability follow-up and do not block the broader sidebar, Settings or browser-shell parity work.
+
 - Verify the managed SSH destination using the same validation rules as Electron's `parseSshTarget`.
-- Verify the NAS SOCKS host/port and confirm the existing NAS service accepts forwarded connections.
+- Verify the SSH destination and confirm `ssh -D` opens the selected local SOCKS port and relays traffic through that SSH host.
 - Add a real connection test and clear UI states for starting, ready, retrying, failed-authentication and port-conflict.
 - Validate configured listener port conflicts without endless retries.
 - Ensure browser traffic stays blocked if the tunnel drops; ensure external clients receive a clear failed connection and never a direct fallback.
@@ -70,11 +83,11 @@ Do not implement multiple named upstream proxy profiles. The native MVP has one 
 - Tab creation/close/reopen, drag reorder, pinning, tab context menus and keyboard shortcuts.
 - Session restore without eagerly loading every restored tab; persist active tab and window state.
 - Persistent profile data separation, private browsing isolation and browsing-data deletion.
-- History, bookmarks and reading list with persistent stores and basic management UI.
+- Reading list with persistent storage and basic management UI; bookmarks and history now have profile-local stores and sidebar management surfaces.
 - Downloads with progress, pause/resume, reveal/open and destination settings.
 - Native permissions, certificate information and safe navigation decisions.
-- Production-quality ad/tracker blocking, not the current test rule set.
-- A functional settings surface with persisted controls for every exposed preference.
+- Production-quality ad/tracker blocking and filter-list updates; the current native rule set remains intentionally limited.
+- Expanded Settings category parity; all controls currently exposed by native Settings must remain persisted and connected to behavior.
 - Error pages, crash recovery, loading indicators, progress and find-in-page.
 - macOS runtime QA on the user's machine, including real SSH and browser usage.
 

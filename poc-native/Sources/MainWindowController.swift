@@ -140,9 +140,9 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
             rootGlass.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             rootGlass.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
             
-            // Sidebar is full height on the left
+            // Sidebar starts below the shared toolbar frame and floats over the page.
             sidebarLeadingConstraint,
-            sidebarView.topAnchor.constraint(equalTo: contentView.topAnchor),
+            sidebarView.topAnchor.constraint(equalTo: omniboxView.bottomAnchor),
             sidebarView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
             sidebarWidthConstraint,
             
@@ -158,9 +158,10 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
             webContainerView.topAnchor.constraint(equalTo: omniboxView.bottomAnchor, constant: 8),
             webContainerView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -8),
         ])
-        // The sidebar is an overlay: keep the browser viewport fixed at the rail edge
-        // and let the expanded panel float above the page instead of pushing it sideways.
-        contentView.addSubview(sidebarView, positioned: .above, relativeTo: nil)
+        // Keep the page card behind the sidebar while leaving the toolbar (including
+        // its only sidebar-toggle button) visible above the panel in both states.
+        contentView.addSubview(sidebarView, positioned: .above, relativeTo: webContainerView)
+        contentView.addSubview(omniboxView, positioned: .above, relativeTo: sidebarView)
         
         TabManager.shared.delegate = self
         WebExtensionManager.shared.onExtensionsChanged = { [weak self] _ in
@@ -176,6 +177,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
 
     public func restoreBrowserSession() {
         // Called after SSH routing and native extensions are initialized.
+        AdBlockManager.shared.setEnabled(BrowserSettingsStore.shared.settings.adBlockingEnabled)
         TabManager.shared.restoreSession()
         setupProgressObserver()
     }
@@ -213,6 +215,9 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     @objc public func menuReload() { omniboxDidClickReload() }
     @objc public func menuToggleSidebar() { omniboxDidToggleSidebar() }
     @objc public func menuFocusAddress() { omniboxView.focusAddressField() }
+    @objc public func menuShowTabs() { omniboxDidShowTabs() }
+    @objc public func menuShowHistory() { omniboxDidShowHistory() }
+    @objc public func menuShowBookmarks() { omniboxDidShowBookmarks() }
     @objc public func menuOpenSettings() {
         showSettingsTab()
     }
@@ -223,6 +228,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
             let controller = BrowserSettingsViewController()
             controller.onClose = { [weak self] in self?.showActiveBrowserTab() }
             controller.onInstallExtension = { [weak self] in self?.showExtensionInstallSheet() }
+            controller.onSettingsSaved = { [weak self] settings in self?.settingsDidChange(settings) }
             settingsViewController = controller
         }
         guard let settingsView = settingsViewController?.view else { return }
@@ -346,6 +352,48 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
         TabManager.shared.persistSession()
     }
 
+    public func omniboxDidShowTabs() {
+        revealSidebarForLibrary()
+        sidebarView.showTabs()
+    }
+
+    public func omniboxDidShowHistory() {
+        revealSidebarForLibrary()
+        sidebarView.showHistory()
+    }
+
+    public func omniboxDidShowBookmarks() {
+        revealSidebarForLibrary()
+        sidebarView.showBookmarks()
+    }
+
+    public func omniboxDidToggleBookmark() {
+        guard let tab = TabManager.shared.activeTab,
+              let url = tab.webView.url ?? tab.url else { return }
+        _ = BrowserLibraryStore.shared.toggleBookmark(url: url, title: tab.webView.title ?? tab.title)
+        sidebarView.reloadTabs()
+        omniboxView.updateForTab(tab)
+    }
+
+    private func revealSidebarForLibrary() {
+        if settingsViewController?.view.superview != nil {
+            showActiveBrowserTab()
+        }
+        if !isSidebarVisible {
+            isSidebarVisible = true
+            var settings = BrowserSettingsStore.shared.settings
+            settings.showSidebarAtStartup = true
+            BrowserSettingsStore.shared.update(settings)
+            updateSidebarWidth(animated: true)
+        }
+    }
+
+    private func settingsDidChange(_ settings: BrowserSettings) {
+        guard isSidebarVisible != settings.showSidebarAtStartup else { return }
+        isSidebarVisible = settings.showSidebarAtStartup
+        updateSidebarWidth(animated: true)
+    }
+
     private func sidebarHoverChanged(_ hovering: Bool) {
         isSidebarHovered = hovering
         guard !isSidebarVisible else { return }
@@ -458,7 +506,19 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     public func sidebarDidOpenExtensions() { menuOpenSettings() }
     public func sidebarDidOpenSettings() { menuOpenSettings() }
     public func sidebarDidQuit() { NSApp.terminate(nil) }
-    public func sidebarDidToggleSidebar() { omniboxDidToggleSidebar() }
+    public func sidebarDidOpenLibraryURL(_ url: URL) {
+        guard let tab = TabManager.shared.activeTab else { return }
+        tab.webView.load(URLRequest(url: url))
+    }
+    public func sidebarDidRemoveBookmark(id: UUID) {
+        BrowserLibraryStore.shared.removeBookmark(id: id)
+        sidebarView.reloadTabs()
+        if let tab = TabManager.shared.activeTab { omniboxView.updateForTab(tab) }
+    }
+    public func sidebarDidClearHistory() {
+        BrowserLibraryStore.shared.clearHistory()
+        sidebarView.reloadTabs()
+    }
 
     private func runTouchIDTest() {
         BrambleNativeBridge.shared.authenticateWithBiometrics { success, error in

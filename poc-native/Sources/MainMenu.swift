@@ -49,6 +49,12 @@ public func setupApplicationMenu() {
     let viewMenu = NSMenu(title: "View")
     viewMenuItem.submenu = viewMenu
     
+    viewMenu.addItem(NSMenuItem(title: "Tabs", action: #selector(MainWindowController.menuShowTabs), keyEquivalent: ""))
+    viewMenu.addItem(NSMenuItem(title: "History", action: #selector(MainWindowController.menuShowHistory), keyEquivalent: "y"))
+    let bookmarksItem = NSMenuItem(title: "Bookmarks", action: #selector(MainWindowController.menuShowBookmarks), keyEquivalent: "O")
+    bookmarksItem.keyEquivalentModifierMask = [.command, .shift]
+    viewMenu.addItem(bookmarksItem)
+    viewMenu.addItem(NSMenuItem.separator())
     viewMenu.addItem(NSMenuItem(title: "Reload Page", action: #selector(MainWindowController.menuReload), keyEquivalent: "r"))
     viewMenu.addItem(NSMenuItem(title: "Toggle Sidebar", action: #selector(MainWindowController.menuToggleSidebar), keyEquivalent: "\\"))
     viewMenu.addItem(NSMenuItem(title: "Focus Address Bar", action: #selector(MainWindowController.menuFocusAddress), keyEquivalent: "l"))

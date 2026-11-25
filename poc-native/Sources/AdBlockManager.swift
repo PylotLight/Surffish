@@ -31,6 +31,7 @@ public final class AdBlockManager {
     """
     
     private init() {
+        isEnabled = BrowserSettingsStore.shared.settings.adBlockingEnabled
         let storeDir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("surffish-crl-store")
         try? FileManager.default.createDirectory(at: storeDir, withIntermediateDirectories: true)
         
@@ -40,8 +41,16 @@ public final class AdBlockManager {
                 print("[AdBlock] Compile error: \(error)")
                 return
             }
-            self?.ruleList = list
-            print("[AdBlock] ContentRuleList compiled successfully")
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.ruleList = list
+                if self.isEnabled, let list {
+                    for tab in TabManager.shared.tabs {
+                        tab.webView.configuration.userContentController.add(list)
+                    }
+                }
+                print("[AdBlock] ContentRuleList compiled successfully")
+            }
         }
     }
     
@@ -53,17 +62,23 @@ public final class AdBlockManager {
     
     @MainActor
     public func toggle() -> Bool {
-        isEnabled.toggle()
-        guard let list = ruleList else { return isEnabled }
+        setEnabled(!isEnabled)
+        return isEnabled
+    }
+
+    @MainActor
+    public func setEnabled(_ enabled: Bool) {
+        guard isEnabled != enabled else { return }
+        isEnabled = enabled
+        guard let list = ruleList else { return }
         for tab in TabManager.shared.tabs {
             let controller = tab.webView.configuration.userContentController
-            if isEnabled {
+            if enabled {
                 controller.add(list)
             } else {
                 controller.remove(list)
             }
             tab.webView.reload()
         }
-        return isEnabled
     }
 }

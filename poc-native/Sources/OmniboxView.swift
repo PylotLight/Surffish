@@ -7,6 +7,10 @@ public protocol OmniboxViewDelegate: AnyObject {
     func omniboxDidClickForward()
     func omniboxDidClickReload()
     func omniboxDidToggleSidebar()
+    func omniboxDidShowTabs()
+    func omniboxDidShowHistory()
+    func omniboxDidShowBookmarks()
+    func omniboxDidToggleBookmark()
     func omniboxDidRequestBramblePopup(sender: NSButton)
     func omniboxDidRequestExtensionManagement()
 }
@@ -30,6 +34,10 @@ public final class OmniboxView: NSVisualEffectView, NSTextFieldDelegate {
     private let backBtn = NSButton()
     private let forwardBtn = NSButton()
     private let reloadBtn = NSButton()
+    private let tabsBtn = NSButton()
+    private let historyBtn = NSButton()
+    private let bookmarksBtn = NSButton()
+    private let bookmarkBtn = NSButton()
 
     private let pillContainer = NSView()
     private let securityIcon = NSImageView()
@@ -60,6 +68,10 @@ public final class OmniboxView: NSVisualEffectView, NSTextFieldDelegate {
         configureButton(backBtn, symbol: "chevron.left", label: "Back", action: #selector(onBack))
         configureButton(forwardBtn, symbol: "chevron.right", label: "Forward", action: #selector(onForward))
         configureButton(reloadBtn, symbol: "arrow.clockwise", label: "Reload", action: #selector(onReload))
+        configureButton(tabsBtn, symbol: "square.stack", label: "Tabs", action: #selector(onTabs))
+        configureButton(historyBtn, symbol: "clock.arrow.circlepath", label: "History", action: #selector(onHistory))
+        configureButton(bookmarksBtn, symbol: "bookmark", label: "Bookmarks", action: #selector(onBookmarks))
+        configureButton(bookmarkBtn, symbol: "bookmark", label: "Bookmark this page", action: #selector(onToggleBookmark))
 
         pillContainer.wantsLayer = true
         pillContainer.layer?.backgroundColor = NSColor(white: 0.12, alpha: 0.52).cgColor
@@ -125,7 +137,27 @@ public final class OmniboxView: NSVisualEffectView, NSTextFieldDelegate {
             reloadBtn.widthAnchor.constraint(equalToConstant: 28),
             reloadBtn.heightAnchor.constraint(equalToConstant: 30),
 
-            pillContainer.leadingAnchor.constraint(equalTo: reloadBtn.trailingAnchor, constant: 10),
+            tabsBtn.leadingAnchor.constraint(equalTo: reloadBtn.trailingAnchor, constant: 2),
+            tabsBtn.centerYAnchor.constraint(equalTo: centerYAnchor),
+            tabsBtn.widthAnchor.constraint(equalToConstant: 28),
+            tabsBtn.heightAnchor.constraint(equalToConstant: 30),
+
+            historyBtn.leadingAnchor.constraint(equalTo: tabsBtn.trailingAnchor, constant: 2),
+            historyBtn.centerYAnchor.constraint(equalTo: centerYAnchor),
+            historyBtn.widthAnchor.constraint(equalToConstant: 28),
+            historyBtn.heightAnchor.constraint(equalToConstant: 30),
+
+            bookmarksBtn.leadingAnchor.constraint(equalTo: historyBtn.trailingAnchor, constant: 2),
+            bookmarksBtn.centerYAnchor.constraint(equalTo: centerYAnchor),
+            bookmarksBtn.widthAnchor.constraint(equalToConstant: 28),
+            bookmarksBtn.heightAnchor.constraint(equalToConstant: 30),
+
+            bookmarkBtn.leadingAnchor.constraint(equalTo: bookmarksBtn.trailingAnchor, constant: 2),
+            bookmarkBtn.centerYAnchor.constraint(equalTo: centerYAnchor),
+            bookmarkBtn.widthAnchor.constraint(equalToConstant: 28),
+            bookmarkBtn.heightAnchor.constraint(equalToConstant: 30),
+
+            pillContainer.leadingAnchor.constraint(equalTo: bookmarkBtn.trailingAnchor, constant: 10),
             pillContainer.trailingAnchor.constraint(equalTo: brambleBtn.leadingAnchor, constant: -10),
             pillContainer.centerYAnchor.constraint(equalTo: centerYAnchor),
             pillContainer.heightAnchor.constraint(equalToConstant: 32),
@@ -195,6 +227,14 @@ public final class OmniboxView: NSVisualEffectView, NSTextFieldDelegate {
         refreshExtensionButton()
         backBtn.isEnabled = tab.webView.canGoBack
         forwardBtn.isEnabled = tab.webView.canGoForward
+        let activeURL = tab.webView.url ?? tab.url
+        let isBookmarked = BrowserLibraryStore.shared.isBookmarked(url: activeURL)
+        bookmarkBtn.image = NSImage(
+            systemSymbolName: isBookmarked ? "bookmark.fill" : "bookmark",
+            accessibilityDescription: isBookmarked ? "Remove bookmark" : "Bookmark this page"
+        )?.withSymbolConfiguration(.init(pointSize: 13, weight: .regular))
+        bookmarkBtn.toolTip = isBookmarked ? "Remove bookmark" : "Bookmark this page"
+        bookmarkBtn.isEnabled = activeURL?.scheme == "http" || activeURL?.scheme == "https"
 
         let reloadSymbol = tab.isLoading ? "xmark" : "arrow.clockwise"
         reloadBtn.image = NSImage(
@@ -238,6 +278,10 @@ public final class OmniboxView: NSVisualEffectView, NSTextFieldDelegate {
     }
 
     @objc private func onToggleSidebar() { delegate?.omniboxDidToggleSidebar() }
+    @objc private func onTabs() { delegate?.omniboxDidShowTabs() }
+    @objc private func onHistory() { delegate?.omniboxDidShowHistory() }
+    @objc private func onBookmarks() { delegate?.omniboxDidShowBookmarks() }
+    @objc private func onToggleBookmark() { delegate?.omniboxDidToggleBookmark() }
     @objc private func onBack() { delegate?.omniboxDidClickBack() }
     @objc private func onForward() { delegate?.omniboxDidClickForward() }
     @objc private func onReload() { delegate?.omniboxDidClickReload() }

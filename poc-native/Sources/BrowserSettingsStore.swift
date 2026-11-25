@@ -39,10 +39,11 @@ public struct BrowserSettings: Codable {
     public var sshProxyPort: Int
     public var sshProxyShareEnabled: Bool
     public var sshProxyBindAddress: String
+    public var adBlockingEnabled: Bool
 
     private enum CodingKeys: String, CodingKey {
         case version, searchEngine, startPage, restoreSession, showSidebarAtStartup
-        case sshProxyEnabled, sshHost, sshProxyPort, sshProxyShareEnabled, sshProxyBindAddress
+        case sshProxyEnabled, sshHost, sshProxyPort, sshProxyShareEnabled, sshProxyBindAddress, adBlockingEnabled
     }
 
     public init(
@@ -55,7 +56,8 @@ public struct BrowserSettings: Codable {
         sshHost: String,
         sshProxyPort: Int = 1080,
         sshProxyShareEnabled: Bool = false,
-        sshProxyBindAddress: String = "127.0.0.1"
+        sshProxyBindAddress: String = "127.0.0.1",
+        adBlockingEnabled: Bool = false
     ) {
         self.version = version
         self.searchEngine = searchEngine
@@ -67,6 +69,7 @@ public struct BrowserSettings: Codable {
         self.sshProxyPort = sshProxyPort
         self.sshProxyShareEnabled = sshProxyShareEnabled
         self.sshProxyBindAddress = sshProxyBindAddress
+        self.adBlockingEnabled = adBlockingEnabled
     }
 
     public init(from decoder: Decoder) throws {
@@ -81,6 +84,7 @@ public struct BrowserSettings: Codable {
         sshProxyPort = try values.decodeIfPresent(Int.self, forKey: .sshProxyPort) ?? 1080
         sshProxyShareEnabled = try values.decodeIfPresent(Bool.self, forKey: .sshProxyShareEnabled) ?? false
         sshProxyBindAddress = try values.decodeIfPresent(String.self, forKey: .sshProxyBindAddress) ?? "127.0.0.1"
+        adBlockingEnabled = try values.decodeIfPresent(Bool.self, forKey: .adBlockingEnabled) ?? false
     }
 
     public static let defaults = BrowserSettings(
@@ -93,7 +97,8 @@ public struct BrowserSettings: Codable {
         sshHost: "",
         sshProxyPort: 1080,
         sshProxyShareEnabled: false,
-        sshProxyBindAddress: "127.0.0.1"
+        sshProxyBindAddress: "127.0.0.1",
+        adBlockingEnabled: false
     )
 
     public var startPageURL: URL {

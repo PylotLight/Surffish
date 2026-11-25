@@ -69,6 +69,7 @@ public final class TabManager: NSObject, WKNavigationDelegate {
     public private(set) var tabs: [TabItem] = []
     public private(set) var activeTabId: UUID?
     public private(set) var isRestoringSession = false
+    private var restoredSessionTabIDs: Set<UUID> = []
 
     public var activeTab: TabItem? {
         guard let id = activeTabId else { return nil }
@@ -156,6 +157,7 @@ public final class TabManager: NSObject, WKNavigationDelegate {
             guard let url = URL(string: savedTab.url),
                   let scheme = url.scheme?.lowercased(),
                   ["http", "https", "file", "webkit-extension"].contains(scheme) else { continue }
+            restoredSessionTabIDs.insert(savedTab.id)
             _ = createTab(
                 url: url,
                 makeActive: false,
@@ -197,6 +199,7 @@ public final class TabManager: NSObject, WKNavigationDelegate {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
         let closingActive = activeTabId == id
         let closingTab = tabs.remove(at: index)
+        restoredSessionTabIDs.remove(id)
         closingTab.webView.stopLoading()
         closingTab.webView.navigationDelegate = nil
 
@@ -293,11 +296,16 @@ public final class TabManager: NSObject, WKNavigationDelegate {
         tab.url = webView.url
         if let title = webView.title, !title.isEmpty { tab.title = title }
         else if let host = webView.url?.host { tab.title = host }
+        let wasRestoredNavigation = restoredSessionTabIDs.remove(tab.id) != nil
+        if !wasRestoredNavigation, let url = webView.url {
+            BrowserLibraryStore.shared.recordVisit(url: url, title: tab.title, isPrivate: tab.isPrivate)
+        }
         notifyTabsChanged()
     }
 
     public func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         guard let tab = tabs.first(where: { $0.webView === webView }) else { return }
+        restoredSessionTabIDs.remove(tab.id)
         DeveloperConsole.shared.recordNavigationFailure(url: webView.url ?? tab.url, error: error, provisional: false)
         tab.isLoading = false
         notifyTabsChanged()
@@ -305,6 +313,7 @@ public final class TabManager: NSObject, WKNavigationDelegate {
 
     public func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         guard let tab = tabs.first(where: { $0.webView === webView }) else { return }
+        restoredSessionTabIDs.remove(tab.id)
         DeveloperConsole.shared.recordNavigationFailure(url: webView.url ?? tab.url, error: error, provisional: true)
         tab.isLoading = false
         notifyTabsChanged()

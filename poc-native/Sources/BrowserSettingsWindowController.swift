@@ -1,17 +1,19 @@
 import AppKit
+import WebKit
 
 @MainActor
 public final class BrowserSettingsViewController: NSViewController {
     public var onClose: (() -> Void)?
     public var onInstallExtension: (() -> Void)?
+    public var onSettingsSaved: ((BrowserSettings) -> Void)?
 
     private let installedExtensionsStack = NSStackView()
     private let extensionStatus = NSTextField(labelWithString: "")
-
     private let searchEngine = NSPopUpButton()
     private let startPage = NSTextField()
     private let restoreSession = NSButton(checkboxWithTitle: "Restore tabs from the previous session", target: nil, action: nil)
     private let showSidebar = NSButton(checkboxWithTitle: "Show sidebar at startup", target: nil, action: nil)
+    private let adBlockingEnabled = NSButton(checkboxWithTitle: "Block common advertising and tracking requests", target: nil, action: nil)
     private let sshProxyEnabled = NSButton(checkboxWithTitle: "Route browser traffic through an SSH SOCKS5 proxy", target: nil, action: nil)
     private let sshHost = NSComboBox()
     private let sshHostSearchButton = NSButton(title: "Search SSH configs", target: nil, action: nil)
@@ -19,6 +21,12 @@ public final class BrowserSettingsViewController: NSViewController {
     private let sshProxyShareEnabled = NSButton(checkboxWithTitle: "Keep the local SOCKS endpoint running when browser routing is off", target: nil, action: nil)
     private let sshProxyPort = NSTextField()
     private let sshProxyBindAddress = NSPopUpButton()
+    private let pagePicker = NSSegmentedControl(labels: ["General", "Privacy", "Extensions", "Connection", "About"], trackingMode: .selectOne, target: nil, action: nil)
+    private let scrollView = NSScrollView()
+    private let clearWebsiteDataButton = NSButton(title: "Clear profile website data…", target: nil, action: nil)
+    private let copyProxyButton = NSButton(title: "Copy local SOCKS5 address", target: nil, action: nil)
+    private var pageStacks: [NSStackView] = []
+    private var activePageWidthConstraint: NSLayoutConstraint?
 
     public override func loadView() {
         let root = NSView()
@@ -35,7 +43,7 @@ public final class BrowserSettingsViewController: NSViewController {
         let heading = NSTextField(labelWithString: "Settings")
         heading.font = .systemFont(ofSize: 25, weight: .semibold)
 
-        let description = NSTextField(wrappingLabelWithString: "Configure Surffish browser and connection preferences.")
+        let description = NSTextField(wrappingLabelWithString: "A focused set of native browser preferences, organized by task.")
         description.textColor = .secondaryLabelColor
         description.maximumNumberOfLines = 2
 
@@ -44,20 +52,18 @@ public final class BrowserSettingsViewController: NSViewController {
         startPage.placeholderString = "https://online.bonjourr.fr/"
         startPage.widthAnchor.constraint(equalToConstant: 440).isActive = true
 
-        let extensionsHeading = NSTextField(labelWithString: "Extensions")
-        extensionsHeading.font = .systemFont(ofSize: 17, weight: .semibold)
+        let extensionHeading = makeSectionHeading("Extensions")
         let installExtensionButton = NSButton(title: "Install extension…", target: self, action: #selector(installExtension))
         installExtensionButton.bezelStyle = .rounded
         let extensionDescription = NSTextField(wrappingLabelWithString: "Manage extensions installed in this Surffish profile. Remove an extension here; use Option-click or right-click its toolbar icon for quick actions.")
         extensionDescription.textColor = .secondaryLabelColor
-        extensionDescription.maximumNumberOfLines = 2
+        extensionDescription.maximumNumberOfLines = 3
         installedExtensionsStack.orientation = .vertical
         installedExtensionsStack.alignment = .leading
         installedExtensionsStack.spacing = 8
         extensionStatus.textColor = .secondaryLabelColor
 
-        let connectionHeading = NSTextField(labelWithString: "Connection")
-        connectionHeading.font = .systemFont(ofSize: 17, weight: .semibold)
+        let connectionHeading = makeSectionHeading("SSH SOCKS5 connection")
         sshHost.placeholderString = "Select an SSH host or enter user@host"
         sshHost.widthAnchor.constraint(equalToConstant: 340).isActive = true
         sshHostSearchButton.target = self
@@ -75,16 +81,24 @@ public final class BrowserSettingsViewController: NSViewController {
         sshHostControls.alignment = .centerY
         sshHostControls.spacing = 8
 
-        let hostHint = NSTextField(wrappingLabelWithString: "Search reads Host names from your local ~/.ssh/config (including included config files). Select one to fill this field, or enter an SSH alias or user@host manually. OpenSSH reads the host, SSH port, identity and authentication settings from that configuration.")
+        let hostHint = NSTextField(wrappingLabelWithString: "Choose an SSH alias or enter user@host. OpenSSH reads the host, port, identity, ProxyJump and authentication settings from your local SSH configuration.")
         hostHint.textColor = .secondaryLabelColor
         hostHint.maximumNumberOfLines = 3
 
-        let warning = NSTextField(wrappingLabelWithString: "Surffish opens a local SOCKS5 endpoint and carries browser connections through SSH. Destination traffic exits from the SSH host. LAN sharing exposes the local endpoint without SOCKS authentication; use only on a trusted network.")
-        warning.textColor = .secondaryLabelColor
-        warning.maximumNumberOfLines = 3
+        let networkWarning = NSTextField(wrappingLabelWithString: "Surffish opens a local SOCKS5 endpoint and carries traffic through SSH; the SSH host is the exit point. LAN sharing exposes the endpoint without SOCKS authentication, so use it only on a trusted network.")
+        networkWarning.textColor = .secondaryLabelColor
+        networkWarning.maximumNumberOfLines = 4
 
-        let copyProxyButton = NSButton(title: "Copy local SOCKS5 address", target: self, action: #selector(copyProxyAddress))
+        let privacyDescription = NSTextField(wrappingLabelWithString: "The current native blocker uses a small built-in WebKit rule set. It is not yet equivalent to the Electron build’s full filter-list and scriptlet coverage.")
+        privacyDescription.textColor = .secondaryLabelColor
+        privacyDescription.maximumNumberOfLines = 4
+        clearWebsiteDataButton.bezelStyle = .rounded
+        clearWebsiteDataButton.target = self
+        clearWebsiteDataButton.action = #selector(clearWebsiteData)
+
         copyProxyButton.bezelStyle = .rounded
+        copyProxyButton.target = self
+        copyProxyButton.action = #selector(copyProxyAddress)
         let saveButton = NSButton(title: "Save & Apply", target: self, action: #selector(saveSettings))
         saveButton.bezelStyle = .rounded
         saveButton.keyEquivalent = "\r"
@@ -97,57 +111,143 @@ public final class BrowserSettingsViewController: NSViewController {
         actionRow.distribution = .fill
         actionRow.spacing = 10
 
-        let stack = NSStackView(views: [
-            heading,
-            description,
-            makeRow(title: "Search engine", control: searchEngine),
-            makeRow(title: "New tab page", control: startPage),
-            restoreSession,
-            showSidebar,
-            extensionsHeading,
-            extensionDescription,
-            installExtensionButton,
-            extensionStatus,
-            installedExtensionsStack,
-            connectionHeading,
-            sshProxyEnabled,
-            makeRow(title: "SSH host", control: sshHostControls),
-            hostHint,
-            sshHostSearchStatus,
-            sshProxyShareEnabled,
-            makeRow(title: "Shared SOCKS5 port", control: sshProxyPort),
-            makeRow(title: "Listen address", control: sshProxyBindAddress),
-            warning,
-            actionRow
+        pageStacks = [
+            makePage([
+                makeSection(title: "Browser", description: "Choose how Surffish opens and searches.", content: [
+                    makeRow(title: "Search engine", control: searchEngine),
+                    makeRow(title: "New tab page", control: startPage),
+                    restoreSession,
+                    showSidebar
+                ])
+            ]),
+            makePage([
+                makeSection(title: "Privacy & site data", description: "These controls apply to this app profile only.", content: [
+                    adBlockingEnabled,
+                    privacyDescription,
+                    clearWebsiteDataButton
+                ])
+            ]),
+            makePage([
+                makeSection(title: "Extensions", description: "Extensions are installed separately into the selected Surffish profile.", content: [
+                    extensionHeading,
+                    extensionDescription,
+                    installExtensionButton,
+                    extensionStatus,
+                    installedExtensionsStack
+                ])
+            ]),
+            makePage([
+                makeSection(title: "Connection", description: "Use the SSH host as the SOCKS5 exit. Browser routing and external sharing can be enabled independently.", content: [
+                    sshProxyEnabled,
+                    makeRow(title: "SSH host", control: sshHostControls),
+                    hostHint,
+                    sshHostSearchStatus,
+                    sshProxyShareEnabled,
+                    makeRow(title: "Local SOCKS5 port", control: sshProxyPort),
+                    makeRow(title: "Listen address", control: sshProxyBindAddress),
+                    networkWarning
+                ])
+            ]),
+            makePage([
+                makeSection(title: "About this profile", description: "Native Surffish uses AppKit and WebKit on macOS 26 or later.", content: [
+                    makeInfoRow(title: "Profile", value: BrowserProfile.current.displayName),
+                    makeInfoRow(title: "Profile storage", value: "Settings, bookmarks, history, extensions and website data are isolated by profile."),
+                    makeInfoRow(title: "Engine", value: "WebKit (native macOS)"),
+                    makeInfoRow(title: "Platform", value: ProcessInfo.processInfo.operatingSystemVersionString)
+                ])
+            ])
+        ]
+
+        pagePicker.segmentStyle = .rounded
+        pagePicker.selectedSegment = 0
+        pagePicker.target = self
+        pagePicker.action = #selector(selectPage(_:))
+        pagePicker.translatesAutoresizingMaskIntoConstraints = false
+
+        scrollView.hasVerticalScroller = true
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(heading)
+        view.addSubview(description)
+        view.addSubview(pagePicker)
+        view.addSubview(scrollView)
+        view.addSubview(actionRow)
+
+        heading.translatesAutoresizingMaskIntoConstraints = false
+        description.translatesAutoresizingMaskIntoConstraints = false
+        actionRow.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            heading.topAnchor.constraint(equalTo: view.topAnchor, constant: 24),
+            heading.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 30),
+            description.topAnchor.constraint(equalTo: heading.bottomAnchor, constant: 6),
+            description.leadingAnchor.constraint(equalTo: heading.leadingAnchor),
+            description.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -30),
+            pagePicker.topAnchor.constraint(equalTo: description.bottomAnchor, constant: 18),
+            pagePicker.leadingAnchor.constraint(equalTo: heading.leadingAnchor),
+            pagePicker.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -30),
+            scrollView.topAnchor.constraint(equalTo: pagePicker.bottomAnchor, constant: 14),
+            scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 26),
+            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -26),
+            scrollView.bottomAnchor.constraint(equalTo: actionRow.topAnchor, constant: -12),
+            actionRow.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 30),
+            actionRow.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -30),
+            actionRow.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -18),
+            actionRow.heightAnchor.constraint(equalToConstant: 34)
         ])
+        selectPage(0)
+    }
+
+    private func makePage(_ sections: [NSView]) -> NSStackView {
+        let stack = NSStackView(views: sections)
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 13
+        stack.spacing = 14
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        return stack
+    }
+
+    private func makeSection(title: String, description: String, content: [NSView]) -> NSView {
+        let titleLabel = makeSectionHeading(title)
+        let descriptionLabel = NSTextField(wrappingLabelWithString: description)
+        descriptionLabel.textColor = .secondaryLabelColor
+        descriptionLabel.maximumNumberOfLines = 3
+
+        let sectionViews: [NSView] = [titleLabel, descriptionLabel] + content
+        let stack = NSStackView(views: sectionViews)
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 11
         stack.translatesAutoresizingMaskIntoConstraints = false
 
-        let scroll = NSScrollView()
-        scroll.documentView = stack
-        scroll.hasVerticalScroller = true
-        scroll.drawsBackground = false
-        scroll.borderType = .noBorder
-        scroll.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(scroll)
-
+        let card = NSView()
+        card.wantsLayer = true
+        card.layer?.cornerRadius = 12
+        card.layer?.backgroundColor = NSColor(white: 1, alpha: 0.045).cgColor
+        card.layer?.borderColor = NSColor(white: 1, alpha: 0.08).cgColor
+        card.layer?.borderWidth = 1
+        card.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(stack)
         NSLayoutConstraint.activate([
-            scroll.topAnchor.constraint(equalTo: view.topAnchor, constant: 28),
-            scroll.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 34),
-            scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -34),
-            scroll.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -24),
-            stack.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor, constant: -4),
-            actionRow.widthAnchor.constraint(equalTo: stack.widthAnchor)
+            stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 18),
+            stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -18),
+            stack.topAnchor.constraint(equalTo: card.topAnchor, constant: 16),
+            stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -16),
+            card.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor, constant: -4)
         ])
+        return card
+    }
 
+    private func makeSectionHeading(_ title: String) -> NSTextField {
+        let heading = NSTextField(labelWithString: title)
+        heading.font = .systemFont(ofSize: 17, weight: .semibold)
+        return heading
     }
 
     private func makeRow(title: String, control: NSView) -> NSView {
         let label = NSTextField(labelWithString: title)
         label.font = .systemFont(ofSize: 13, weight: .medium)
-        label.widthAnchor.constraint(equalToConstant: 130).isActive = true
+        label.widthAnchor.constraint(equalToConstant: 145).isActive = true
         let row = NSStackView(views: [label, control])
         row.orientation = .horizontal
         row.alignment = .centerY
@@ -155,16 +255,45 @@ public final class BrowserSettingsViewController: NSViewController {
         return row
     }
 
+    private func makeInfoRow(title: String, value: String) -> NSView {
+        let label = NSTextField(labelWithString: title)
+        label.font = .systemFont(ofSize: 13, weight: .medium)
+        label.widthAnchor.constraint(equalToConstant: 145).isActive = true
+        let valueLabel = NSTextField(wrappingLabelWithString: value)
+        valueLabel.textColor = .secondaryLabelColor
+        valueLabel.maximumNumberOfLines = 3
+        let row = NSStackView(views: [label, valueLabel])
+        row.orientation = .horizontal
+        row.alignment = .top
+        row.spacing = 16
+        return row
+    }
+
+    @objc private func selectPage(_ sender: NSSegmentedControl) {
+        selectPage(sender.selectedSegment)
+    }
+
+    private func selectPage(_ index: Int) {
+        guard pageStacks.indices.contains(index) else { return }
+        activePageWidthConstraint?.isActive = false
+        let stack = pageStacks[index]
+        scrollView.documentView = stack
+        let width = stack.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor, constant: -4)
+        width.isActive = true
+        activePageWidthConstraint = width
+        copyProxyButton.isHidden = index != 3
+    }
+
     @objc private func installExtension() { onInstallExtension?() }
 
     private func refreshExtensions() {
-        installedExtensionsStack.arrangedSubviews.forEach { view in
-            installedExtensionsStack.removeArrangedSubview(view)
-            view.removeFromSuperview()
+        installedExtensionsStack.arrangedSubviews.forEach { subview in
+            installedExtensionsStack.removeArrangedSubview(subview)
+            subview.removeFromSuperview()
         }
         let extensions = WebExtensionManager.shared.loadedExtensions
         extensionStatus.stringValue = extensions.isEmpty ? "No extensions installed" : "\(extensions.count) installed"
-        for item in extensions {
+        for (index, item) in extensions.enumerated() {
             let name = NSTextField(labelWithString: "\(item.name)  ·  v\(item.version)")
             name.font = .systemFont(ofSize: 13, weight: .medium)
             let details = NSTextField(labelWithString: item.hasPopup ? "Toolbar popup available" : "Background / options extension")
@@ -172,12 +301,12 @@ public final class BrowserSettingsViewController: NSViewController {
             details.textColor = .secondaryLabelColor
             let remove = NSButton(title: "Uninstall", target: self, action: #selector(uninstallExtension(_:)))
             remove.bezelStyle = .rounded
-            remove.tag = extensions.firstIndex(where: { $0.id == item.id }) ?? 0
+            remove.tag = index
             let row = NSStackView(views: [name, NSView(), remove])
             row.orientation = .horizontal
             row.alignment = .centerY
             row.distribution = .fill
-            row.widthAnchor.constraint(equalToConstant: 560).isActive = true
+            row.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor, constant: -44).isActive = true
             let group = NSStackView(views: [row, details])
             group.orientation = .vertical
             group.alignment = .leading
@@ -193,7 +322,7 @@ public final class BrowserSettingsViewController: NSViewController {
 
     @objc private func uninstallExtension(_ sender: NSButton) {
         let extensions = WebExtensionManager.shared.loadedExtensions
-        guard sender.tag >= 0, sender.tag < extensions.count else { return }
+        guard extensions.indices.contains(sender.tag) else { return }
         let item = extensions[sender.tag]
         let alert = NSAlert()
         alert.messageText = "Uninstall \(item.name)?"
@@ -216,6 +345,7 @@ public final class BrowserSettingsViewController: NSViewController {
         startPage.stringValue = settings.startPage
         restoreSession.state = settings.restoreSession ? .on : .off
         showSidebar.state = settings.showSidebarAtStartup ? .on : .off
+        adBlockingEnabled.state = settings.adBlockingEnabled ? .on : .off
         sshProxyEnabled.state = settings.sshProxyEnabled ? .on : .off
         sshHost.stringValue = settings.sshHost
         searchSshHosts()
@@ -254,6 +384,25 @@ public final class BrowserSettingsViewController: NSViewController {
         NSPasteboard.general.setString("socks5h://\(host):\(settings.sshProxyPort)", forType: .string)
     }
 
+    @objc private func clearWebsiteData() {
+        let alert = NSAlert()
+        alert.messageText = "Clear website data for \(BrowserProfile.current.displayName)?"
+        alert.informativeText = "This removes cookies, caches and other website storage for this native app profile. It does not clear bookmarks or browsing history."
+        alert.addButton(withTitle: "Clear Website Data")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        let dataStore = WKWebsiteDataStore(forIdentifier: BrowserProfile.current.websiteDataStoreIdentifier)
+        let dataTypes = WKWebsiteDataStore.allWebsiteDataTypes()
+        dataStore.fetchDataRecords(ofTypes: dataTypes) { [weak self] records in
+            dataStore.removeData(ofTypes: dataTypes, for: records) {
+                DispatchQueue.main.async {
+                    self?.showValidationAlert(title: "Website data cleared", message: "Website data was removed from the \(BrowserProfile.current.displayName) profile.")
+                }
+            }
+        }
+    }
+
     @objc private func saveSettings() {
         let current = BrowserSettingsStore.shared.settings
         var next = current
@@ -274,6 +423,7 @@ public final class BrowserSettingsViewController: NSViewController {
 
         next.restoreSession = restoreSession.state == .on
         next.showSidebarAtStartup = showSidebar.state == .on
+        next.adBlockingEnabled = adBlockingEnabled.state == .on
         next.sshProxyEnabled = sshProxyEnabled.state == .on
         next.sshProxyShareEnabled = sshProxyShareEnabled.state == .on
         next.sshHost = sshHost.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -291,6 +441,8 @@ public final class BrowserSettingsViewController: NSViewController {
         }
 
         BrowserSettingsStore.shared.update(next)
+        AdBlockManager.shared.setEnabled(next.adBlockingEnabled)
+        onSettingsSaved?(next)
         Task {
             await SshTunnelManager.shared.configure(
                 browserEnabled: next.sshProxyEnabled,
