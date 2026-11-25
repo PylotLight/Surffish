@@ -38,22 +38,21 @@ For command-line launches, `--profile production`, `--profile development` or `S
 - `MainWindowController.swift`: native window, sidebar, toolbar, WebKit content and browser commands.
 - `SidebarView.swift` and `OmniboxView.swift`: native browser chrome.
 - `WebExtensionManager.swift`: WebKit Web Extensions and profile-specific extension installation.
-- `SshTunnelManager.swift`: native OpenSSH process, SOCKS5 listener, readiness, status and reconnect.
+- `SshTunnelManager.swift`: native OpenSSH local TCP forwarding to the NAS SOCKS5 service, readiness, status and reconnect.
 - `WebKitProxyController.swift`: WebKit SOCKSv5 proxy configuration with failover disabled.
 
-## SSH SOCKS5 service
+## SSH to NAS SOCKS5 service
 
-Connection settings support one managed SSH destination and one SOCKS5 endpoint. Multiple upstream proxy profiles are intentionally out of scope.
+Surffish does not create a second SOCKS implementation and does not use OpenSSH dynamic forwarding (`-D`). The NAS already runs the SOCKS5 server; Surffish connects to that server through an SSH local port forward (`-L`).
 
-- SSH uses macOS `/usr/bin/ssh`, so OpenSSH resolves `~/.ssh/config`, Include, ProxyJump, ProxyCommand, IdentityFile, known_hosts and ssh-agent.
-- The local SOCKS5 port is configurable (default `1080`).
-- Browser routing and external-client availability are independent.
-- The listener defaults to `127.0.0.1`; optional `0.0.0.0` binding requires explicit LAN sharing.
-- The endpoint is usable by other local apps as `socks5h://127.0.0.1:1080`.
-- `socks5h` requests remote DNS resolution through the SOCKS server.
-- The NAS is the SSH destination and performs outbound connections. The SOCKS listener itself is on the Mac.
-- LAN binding is unauthenticated at the SOCKS layer; use a trusted network and firewall.
-- If browser proxying is enabled, WebKit has no direct fallback when the tunnel is down.
+- SSH destination: one host alias or `user@host`, resolved by native OpenSSH using the user's SSH config, IdentityFile, known_hosts, ProxyJump, ProxyCommand and ssh-agent.
+- NAS SOCKS endpoint: configurable host and port, default `127.0.0.1:1080` as seen from the NAS itself.
+- Local endpoint: configurable port, default `1080`.
+- The SSH client binds the local endpoint on `127.0.0.1` by default and forwards raw TCP to the NAS SOCKS endpoint. SOCKS5 negotiation and remote DNS remain end-to-end with the NAS daemon.
+- Browser routing and external application sharing can be enabled independently. When either is enabled, both use the same local forwarded endpoint.
+- Optional LAN sharing binds the local forward to `0.0.0.0` using OpenSSH `-g`; the NAS SOCKS server still remains the upstream proxy.
+- Use `socks5h://127.0.0.1:1080` in other applications. The `h` ensures destination hostnames are resolved by the SOCKS server on the NAS.
+- LAN exposure has no added SOCKS authentication. Use a trusted network and firewall.
 
 Example:
 
@@ -61,7 +60,7 @@ Example:
 curl --proxy socks5h://127.0.0.1:1080 https://ifconfig.me
 ```
 
-The native networking MVP still requires runtime validation against the actual NAS, authentication setup, proxy DNS, concurrent external clients, sleep/wake and tunnel-drop behaviour.
+The app's "SSH forward ready" status confirms the local SSH forward is listening. It does not independently prove that the NAS SOCKS daemon is reachable; the first real proxied request validates that final leg. Runtime validation on the actual NAS is required for SSH authentication, SOCKS negotiation, remote DNS, concurrent clients, sleep/wake and tunnel-drop behaviour.
 
 ## Roadmap and Electron parity
 
