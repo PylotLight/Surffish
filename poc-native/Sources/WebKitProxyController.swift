@@ -3,10 +3,14 @@ import WebKit
 
 @MainActor
 public enum WebKitProxyController {
-    public static func apply(port: UInt16?, to dataStore: WKWebsiteDataStore = .default()) {
+    public static func apply(port: UInt16?) {
+        apply(port: port, to: WKWebsiteDataStore.default())
+    }
+
+    public static func apply(port: UInt16?, to dataStore: WKWebsiteDataStore) {
         guard let port,
               let endpointPort = NWEndpoint.Port(rawValue: port) else {
-            dataStore.proxyConfigurations = nil
+            dataStore.proxyConfigurations = []
             return
         }
 
