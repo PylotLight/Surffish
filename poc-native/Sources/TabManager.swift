@@ -104,7 +104,7 @@ public final class TabManager: NSObject, WKNavigationDelegate {
             BrambleNativeBridge.shared.applyTo(userContentController: configuration.userContentController)
         }
 
-        WebKitProxyController.apply(port: SshTunnelManager.shared.proxyPort, to: configuration.websiteDataStore)
+        WebKitProxyController.apply(port: SshTunnelManager.shared.browserProxyPort, to: configuration.websiteDataStore)
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
         if #available(macOS 13.3, *) { webView.isInspectable = true }
