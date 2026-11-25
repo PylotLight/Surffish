@@ -7,8 +7,6 @@ public protocol OmniboxViewDelegate: AnyObject {
     func omniboxDidClickForward()
     func omniboxDidClickReload()
     func omniboxDidToggleSidebar()
-    func omniboxDidToggleAdBlock()
-    func omniboxDidRequestInstallExtension()
     func omniboxDidRequestBramblePopup(sender: NSButton)
 }
 
@@ -26,8 +24,6 @@ public final class OmniboxView: NSVisualEffectView, NSTextFieldDelegate {
     private let progressBar = NSProgressIndicator()
 
     private let brambleBtn = NSButton()
-    private let adBlockBtn = NSButton()
-    private let installExtBtn = NSButton()
 
     public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -88,8 +84,6 @@ public final class OmniboxView: NSVisualEffectView, NSTextFieldDelegate {
         pillContainer.addSubview(progressBar)
 
         configureButton(brambleBtn, title: "🫐", label: "Bramble Password Manager", action: #selector(onBrambleClicked))
-        configureButton(adBlockBtn, symbol: "shield.lefthalf.filled", label: "Toggle AdBlock", action: #selector(onAdBlockClicked))
-        configureButton(installExtBtn, symbol: "puzzlepiece.extension", label: "Install Extension", action: #selector(onInstallExtClicked))
 
         NSLayoutConstraint.activate([
             sidebarToggleBtn.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
@@ -131,17 +125,7 @@ public final class OmniboxView: NSVisualEffectView, NSTextFieldDelegate {
             progressBar.bottomAnchor.constraint(equalTo: pillContainer.bottomAnchor),
             progressBar.heightAnchor.constraint(equalToConstant: 2),
 
-            installExtBtn.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
-            installExtBtn.centerYAnchor.constraint(equalTo: centerYAnchor),
-            installExtBtn.widthAnchor.constraint(equalToConstant: 30),
-            installExtBtn.heightAnchor.constraint(equalToConstant: 30),
-
-            adBlockBtn.trailingAnchor.constraint(equalTo: installExtBtn.leadingAnchor, constant: -3),
-            adBlockBtn.centerYAnchor.constraint(equalTo: centerYAnchor),
-            adBlockBtn.widthAnchor.constraint(equalToConstant: 30),
-            adBlockBtn.heightAnchor.constraint(equalToConstant: 30),
-
-            brambleBtn.trailingAnchor.constraint(equalTo: adBlockBtn.leadingAnchor, constant: -3),
+            brambleBtn.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
             brambleBtn.centerYAnchor.constraint(equalTo: centerYAnchor),
             brambleBtn.widthAnchor.constraint(equalToConstant: 30),
             brambleBtn.heightAnchor.constraint(equalToConstant: 30),
@@ -226,6 +210,4 @@ public final class OmniboxView: NSVisualEffectView, NSTextFieldDelegate {
     @objc private func onForward() { delegate?.omniboxDidClickForward() }
     @objc private func onReload() { delegate?.omniboxDidClickReload() }
     @objc private func onBrambleClicked() { delegate?.omniboxDidRequestBramblePopup(sender: brambleBtn) }
-    @objc private func onAdBlockClicked() { delegate?.omniboxDidToggleAdBlock() }
-    @objc private func onInstallExtClicked() { delegate?.omniboxDidRequestInstallExtension() }
 }
