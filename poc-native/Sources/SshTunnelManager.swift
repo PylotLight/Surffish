@@ -29,7 +29,7 @@ public final class SshTunnelManager {
     private var appliedBrowserProxyPort: UInt16?
     private var reconnectTask: Task<Void, Never>?
 
-    private let startupTimeout: TimeInterval = 8
+    private let startupTimeout: TimeInterval = 20
     private let stopTimeout: TimeInterval = 1
 
     private init() {}
@@ -178,9 +178,12 @@ public final class SshTunnelManager {
                         .filter { !$0.hasPrefix("debug") && !$0.isEmpty }
                         .suffix(2)
                         .joined(separator: " ")
-                    self.updateStatus(detail.isEmpty
+                    let failureHint = detail.localizedCaseInsensitiveContains("No route to host")
+                        ? "macOS reports no route to the SSH host. Check this app's Local Network permission and confirm the host is reachable from this Mac."
+                        : detail
+                    self.updateStatus(failureHint.isEmpty
                         ? "SSH tunnel exited (code \(terminated.terminationStatus))"
-                        : "SSH tunnel exited: \(detail)")
+                        : "SSH tunnel exited: \(failureHint)")
                     self.appendDiagnostics("\nSSH process exited with code \(terminated.terminationStatus).\n")
                     DeveloperConsole.shared.record(
                         level: "ERROR",
@@ -200,15 +203,20 @@ public final class SshTunnelManager {
             while Date() < deadline {
                 guard runID == generation, enabled else { return }
                 if child.isRunning {
-                    let listening = await Self.isListening(port: port)
-                    if listening {
-                        reconnectAttempt = 0
-                        updateStatus("SSH SOCKS5 ready · \(bindAddress):\(port) via \(target)")
-                        if browserEnabled && !hasReloadedTabsForCurrentConfiguration {
-                            TabManager.shared.reloadAllTabs()
-                            hasReloadedTabsForCurrentConfiguration = true
+                    // OpenSSH creates the local -D listener before the remote SSH
+                    // connection is authenticated. Require both signals before readiness.
+                    let authenticated = stderrText.localizedCaseInsensitiveContains("Authenticated to ")
+                    if authenticated {
+                        let listening = await Self.isListening(port: port)
+                        if listening {
+                            reconnectAttempt = 0
+                            updateStatus("SSH authenticated · SOCKS5 ready · \(bindAddress):\(port) via \(target)")
+                            if browserEnabled && !hasReloadedTabsForCurrentConfiguration {
+                                TabManager.shared.reloadAllTabs()
+                                hasReloadedTabsForCurrentConfiguration = true
+                            }
+                            return
                         }
-                        return
                     }
                 }
                 if !child.isRunning {
@@ -228,9 +236,9 @@ public final class SshTunnelManager {
                 try? await Task.sleep(for: .milliseconds(100))
             }
 
-            updateStatus("SSH did not open the SOCKS5 port within 8 seconds")
-            appendDiagnostics("\nTimed out waiting for the local SOCKS5 listener.\n")
-            DeveloperConsole.shared.record(level: "ERROR", source: "SSH", message: "Timed out waiting for SOCKS5 listener. \(stderrText.suffix(8_000))")
+            updateStatus("SSH did not authenticate and open the SOCKS5 port within 20 seconds")
+            appendDiagnostics("\nTimed out waiting for SSH authentication and the local SOCKS5 listener. The local -D socket alone is not proof that the SSH tunnel is connected.\n")
+            DeveloperConsole.shared.record(level: "ERROR", source: "SSH", message: "Timed out waiting for SSH authentication and SOCKS5 listener. \(stderrText.suffix(8_000))")
             child.terminate()
             scheduleReconnect(generation: runID)
         } catch {
