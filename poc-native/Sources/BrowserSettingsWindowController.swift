@@ -16,7 +16,6 @@ public final class BrowserSettingsViewController: NSViewController {
     private let sshProxyPort = NSTextField()
     private let sshProxyBindAddress = NSPopUpButton()
     private let sshStatus = NSTextField(labelWithString: "Not configured")
-    private let diagnosticsView = NSTextView()
 
     public override func loadView() {
         let root = NSView()
@@ -31,7 +30,7 @@ public final class BrowserSettingsViewController: NSViewController {
         let heading = NSTextField(labelWithString: "Settings")
         heading.font = .systemFont(ofSize: 25, weight: .semibold)
 
-        let description = NSTextField(wrappingLabelWithString: "Configure Surffish and inspect live connection diagnostics without leaving the browser.")
+        let description = NSTextField(wrappingLabelWithString: "Configure Surffish browser and connection preferences.")
         description.textColor = .secondaryLabelColor
         description.maximumNumberOfLines = 2
 
@@ -83,28 +82,6 @@ public final class BrowserSettingsViewController: NSViewController {
         actionRow.distribution = .fill
         actionRow.spacing = 10
 
-        diagnosticsView.isEditable = false
-        diagnosticsView.isRichText = false
-        diagnosticsView.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
-        diagnosticsView.textColor = NSColor(white: 0.92, alpha: 1)
-        diagnosticsView.backgroundColor = NSColor(white: 0.055, alpha: 1)
-        diagnosticsView.textContainerInset = NSSize(width: 10, height: 8)
-        diagnosticsView.isHorizontallyResizable = false
-        diagnosticsView.isVerticallyResizable = true
-        diagnosticsView.minSize = NSSize(width: 0, height: 0)
-        diagnosticsView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        diagnosticsView.autoresizingMask = [.width]
-        diagnosticsView.textContainer?.widthTracksTextView = true
-        diagnosticsView.textContainer?.lineBreakMode = .byCharWrapping
-        diagnosticsView.string = SshTunnelManager.shared.diagnosticsText
-        let diagnosticsScroll = NSScrollView()
-        diagnosticsScroll.documentView = diagnosticsView
-        diagnosticsScroll.hasVerticalScroller = true
-        diagnosticsScroll.hasHorizontalScroller = false
-        diagnosticsScroll.autohidesScrollers = true
-        diagnosticsScroll.borderType = .bezelBorder
-        diagnosticsScroll.heightAnchor.constraint(equalToConstant: 180).isActive = true
-
         let stack = NSStackView(views: [
             heading,
             description,
@@ -122,8 +99,6 @@ public final class BrowserSettingsViewController: NSViewController {
             makeRow(title: "Listen address", control: sshProxyBindAddress),
             warning,
             sshStatus,
-            NSTextField(labelWithString: "SSH connection diagnostics"),
-            diagnosticsScroll,
             actionRow
         ])
         stack.orientation = .vertical
@@ -145,7 +120,6 @@ public final class BrowserSettingsViewController: NSViewController {
             scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -34),
             scroll.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -24),
             stack.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor, constant: -4),
-            diagnosticsScroll.widthAnchor.constraint(equalTo: stack.widthAnchor),
             actionRow.widthAnchor.constraint(equalTo: stack.widthAnchor)
         ])
 
@@ -154,26 +128,11 @@ public final class BrowserSettingsViewController: NSViewController {
                 self?.sshStatus.stringValue = status
             }
         }
-        SshTunnelManager.shared.onDiagnosticsChange = { [weak self] text in
-            DispatchQueue.main.async {
-                guard let self else { return }
-                self.diagnosticsView.string = text
-                let end = (text as NSString).length
-                if end > 0 {
-                    self.diagnosticsView.scrollRangeToVisible(NSRange(location: end, length: 0))
-                }
-            }
-        }
     }
 
     public override func viewDidAppear() {
         super.viewDidAppear()
         sshStatus.stringValue = SshTunnelManager.shared.status
-        diagnosticsView.string = SshTunnelManager.shared.diagnosticsText
-        let end = (diagnosticsView.string as NSString).length
-        if end > 0 {
-            diagnosticsView.scrollRangeToVisible(NSRange(location: end, length: 0))
-        }
     }
 
     private func makeRow(title: String, control: NSView) -> NSView {
@@ -200,7 +159,6 @@ public final class BrowserSettingsViewController: NSViewController {
         sshProxyPort.stringValue = String(settings.sshProxyPort)
         sshProxyBindAddress.selectItem(at: settings.sshProxyBindAddress == "0.0.0.0" ? 1 : 0)
         sshStatus.stringValue = SshTunnelManager.shared.status
-        diagnosticsView.string = SshTunnelManager.shared.diagnosticsText
     }
 
     @objc private func searchSshHosts() {
@@ -271,7 +229,6 @@ public final class BrowserSettingsViewController: NSViewController {
 
         BrowserSettingsStore.shared.update(next)
         sshStatus.stringValue = "Settings saved · applying SSH connection…"
-        diagnosticsView.string = "Saved target: \(next.sshHost)\nSOCKS5 port: \(next.sshProxyPort)\n\nApplying configuration…"
         Task { [weak self] in
             await SshTunnelManager.shared.configure(
                 browserEnabled: next.sshProxyEnabled,
@@ -281,7 +238,6 @@ public final class BrowserSettingsViewController: NSViewController {
                 bindAddress: next.sshProxyBindAddress
             )
             self?.sshStatus.stringValue = SshTunnelManager.shared.status
-            self?.diagnosticsView.string = SshTunnelManager.shared.diagnosticsText
         }
     }
 
