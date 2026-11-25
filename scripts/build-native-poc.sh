@@ -4,6 +4,34 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${ROOT_DIR}/poc-native/build"
 STAGING_DIR="${BUILD_DIR}/staging"
+
+# macOS 27 SDKs express SwiftUI @State as a macro. The SwiftUIMacros plugin is
+# bundled with full Xcode, not the standalone Command Line Tools package. When
+# CLT is selected, pin to an installed macOS 26 SDK (the project's deployment
+# baseline) so these SwiftUI declarations remain buildable without that plugin.
+ACTIVE_DEVELOPER_DIR="${DEVELOPER_DIR:-$(/usr/bin/xcode-select -p 2>/dev/null || true)}"
+if [[ -z "${SDKROOT:-}" && "${ACTIVE_DEVELOPER_DIR}" == */CommandLineTools ]]; then
+    sdk_dir="${ACTIVE_DEVELOPER_DIR}/SDKs"
+    macos26_sdks=()
+    for candidate in "${sdk_dir}"/MacOSX26*.sdk; do
+        [[ -d "${candidate}" ]] && macos26_sdks+=("${candidate}")
+    done
+    if (( ${#macos26_sdks[@]} > 0 )); then
+        SDKROOT="${macos26_sdks[${#macos26_sdks[@]}-1]}"
+        export SDKROOT
+        echo "==> Using macOS 26 SDK ${SDKROOT} with the selected Command Line Tools."
+    else
+        echo "ERROR: The selected Command Line Tools use the macOS 27 SDK, whose SwiftUI @State macro requires the SwiftUIMacros plugin bundled with full Xcode."
+        echo "Install/select full Xcode, or install a macOS 26 SDK and set SDKROOT to its .sdk path before building."
+        exit 1
+    fi
+fi
+
+SWIFT_SDK_FLAGS=()
+if [[ -n "${SDKROOT:-}" ]]; then
+    SWIFT_SDK_FLAGS=(-sdk "${SDKROOT}")
+fi
+
 echo "==> Building Surffish Native for macOS 26 / Apple Silicon..."
 mkdir -p "${STAGING_DIR}"
 
@@ -24,6 +52,7 @@ build_profile_app() {
     # executable UUID as part of app identity; sharing one Mach-O between the
     # production and development bundles makes that identity ambiguous.
     xcrun swiftc \
+      "${SWIFT_SDK_FLAGS[@]}" \
       -parse-as-library \
       -target arm64-apple-macosx26.0 \
       -module-cache-path /tmp/swift-cache \
