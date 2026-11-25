@@ -14,71 +14,69 @@ public protocol OmniboxViewDelegate: AnyObject {
 
 public final class OmniboxView: NSVisualEffectView, NSTextFieldDelegate {
     public weak var delegate: OmniboxViewDelegate?
-    
+
     private let sidebarToggleBtn = NSButton()
     private let backBtn = NSButton()
     private let forwardBtn = NSButton()
     private let reloadBtn = NSButton()
-    
+
     private let pillContainer = NSView()
-    private let lockIcon = NSTextField(labelWithString: "🔒")
+    private let securityIcon = NSImageView()
     private let addressField = NSTextField()
     private let progressBar = NSProgressIndicator()
-    
+
     private let brambleBtn = NSButton()
     private let adBlockBtn = NSButton()
     private let installExtBtn = NSButton()
-    
+
     public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         setupView()
     }
-    
+
     public required init?(coder: NSCoder) {
         super.init(coder: coder)
         setupView()
     }
-    
+
     private func setupView() {
         material = .headerView
         blendingMode = .withinWindow
         state = .active
         wantsLayer = true
-        
-        // Buttons
-        configureButton(sidebarToggleBtn, title: "☰", action: #selector(onToggleSidebar))
+
+        configureButton(sidebarToggleBtn, symbol: "sidebar.left", label: "Toggle Sidebar", action: #selector(onToggleSidebar))
         sidebarToggleBtn.toolTip = "Toggle Sidebar (Cmd+\\)"
-        
-        configureButton(backBtn, title: "◀", action: #selector(onBack))
-        configureButton(forwardBtn, title: "▶", action: #selector(onForward))
-        configureButton(reloadBtn, title: "⟳", action: #selector(onReload))
-        
-        // Pill container (dark translucent glass pill)
+
+        configureButton(backBtn, symbol: "chevron.left", label: "Back", action: #selector(onBack))
+        configureButton(forwardBtn, symbol: "chevron.right", label: "Forward", action: #selector(onForward))
+        configureButton(reloadBtn, symbol: "arrow.clockwise", label: "Reload", action: #selector(onReload))
+
         pillContainer.wantsLayer = true
-        pillContainer.layer?.backgroundColor = NSColor(white: 0.15, alpha: 0.45).cgColor
-        pillContainer.layer?.cornerRadius = 9
-        pillContainer.layer?.borderColor = NSColor(white: 1.0, alpha: 0.12).cgColor
+        pillContainer.layer?.backgroundColor = NSColor(white: 0.12, alpha: 0.52).cgColor
+        pillContainer.layer?.cornerRadius = 11
+        pillContainer.layer?.borderColor = NSColor(white: 1.0, alpha: 0.10).cgColor
         pillContainer.layer?.borderWidth = 1
         pillContainer.translatesAutoresizingMaskIntoConstraints = false
         addSubview(pillContainer)
-        
-        lockIcon.font = NSFont.systemFont(ofSize: 11)
-        lockIcon.textColor = .secondaryLabelColor
-        lockIcon.translatesAutoresizingMaskIntoConstraints = false
-        pillContainer.addSubview(lockIcon)
-        
+
+        securityIcon.imageScaling = .scaleProportionallyDown
+        securityIcon.contentTintColor = .secondaryLabelColor
+        securityIcon.translatesAutoresizingMaskIntoConstraints = false
+        pillContainer.addSubview(securityIcon)
+
         addressField.isBordered = false
         addressField.drawsBackground = false
         addressField.focusRingType = .none
         addressField.font = NSFont.systemFont(ofSize: 13, weight: .regular)
         addressField.textColor = .labelColor
-        addressField.placeholderString = "Search with DuckDuckGo or enter address..."
+        addressField.placeholderString = "Search or enter address"
         addressField.target = self
         addressField.action = #selector(onFieldSubmit)
         addressField.delegate = self
         addressField.translatesAutoresizingMaskIntoConstraints = false
         pillContainer.addSubview(addressField)
-        
+
         progressBar.style = .bar
         progressBar.isIndeterminate = false
         progressBar.minValue = 0.0
@@ -88,100 +86,122 @@ public final class OmniboxView: NSVisualEffectView, NSTextFieldDelegate {
         progressBar.controlSize = .mini
         progressBar.translatesAutoresizingMaskIntoConstraints = false
         pillContainer.addSubview(progressBar)
-        
-        // Right tool buttons
-        configureButton(brambleBtn, title: "🫐", action: #selector(onBrambleClicked))
-        brambleBtn.toolTip = "Bramble Password Manager"
-        
-        configureButton(adBlockBtn, title: "🛡️", action: #selector(onAdBlockClicked))
-        adBlockBtn.toolTip = "Toggle AdBlock"
-        
-        configureButton(installExtBtn, title: "🧩+", action: #selector(onInstallExtClicked))
-        installExtBtn.toolTip = "Install Extension..."
-        
+
+        configureButton(brambleBtn, title: "🫐", label: "Bramble Password Manager", action: #selector(onBrambleClicked))
+        configureButton(adBlockBtn, symbol: "shield.lefthalf.filled", label: "Toggle AdBlock", action: #selector(onAdBlockClicked))
+        configureButton(installExtBtn, symbol: "puzzlepiece.extension", label: "Install Extension", action: #selector(onInstallExtClicked))
+
         NSLayoutConstraint.activate([
-            // Inset 10pt (clean alignment with right side of sidebar)
             sidebarToggleBtn.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
             sidebarToggleBtn.centerYAnchor.constraint(equalTo: centerYAnchor),
-            sidebarToggleBtn.widthAnchor.constraint(equalToConstant: 28),
-            sidebarToggleBtn.heightAnchor.constraint(equalToConstant: 28),
-            
-            backBtn.leadingAnchor.constraint(equalTo: sidebarToggleBtn.trailingAnchor, constant: 6),
+            sidebarToggleBtn.widthAnchor.constraint(equalToConstant: 30),
+            sidebarToggleBtn.heightAnchor.constraint(equalToConstant: 30),
+
+            backBtn.leadingAnchor.constraint(equalTo: sidebarToggleBtn.trailingAnchor, constant: 4),
             backBtn.centerYAnchor.constraint(equalTo: centerYAnchor),
             backBtn.widthAnchor.constraint(equalToConstant: 28),
-            backBtn.heightAnchor.constraint(equalToConstant: 28),
-            
-            forwardBtn.leadingAnchor.constraint(equalTo: backBtn.trailingAnchor, constant: 4),
+            backBtn.heightAnchor.constraint(equalToConstant: 30),
+
+            forwardBtn.leadingAnchor.constraint(equalTo: backBtn.trailingAnchor, constant: 2),
             forwardBtn.centerYAnchor.constraint(equalTo: centerYAnchor),
             forwardBtn.widthAnchor.constraint(equalToConstant: 28),
-            forwardBtn.heightAnchor.constraint(equalToConstant: 28),
-            
-            reloadBtn.leadingAnchor.constraint(equalTo: forwardBtn.trailingAnchor, constant: 4),
+            forwardBtn.heightAnchor.constraint(equalToConstant: 30),
+
+            reloadBtn.leadingAnchor.constraint(equalTo: forwardBtn.trailingAnchor, constant: 2),
             reloadBtn.centerYAnchor.constraint(equalTo: centerYAnchor),
             reloadBtn.widthAnchor.constraint(equalToConstant: 28),
-            reloadBtn.heightAnchor.constraint(equalToConstant: 28),
-            
-            // Omnibox Pill
+            reloadBtn.heightAnchor.constraint(equalToConstant: 30),
+
             pillContainer.leadingAnchor.constraint(equalTo: reloadBtn.trailingAnchor, constant: 10),
             pillContainer.trailingAnchor.constraint(equalTo: brambleBtn.leadingAnchor, constant: -10),
             pillContainer.centerYAnchor.constraint(equalTo: centerYAnchor),
-            pillContainer.heightAnchor.constraint(equalToConstant: 30),
-            
-            lockIcon.leadingAnchor.constraint(equalTo: pillContainer.leadingAnchor, constant: 8),
-            lockIcon.centerYAnchor.constraint(equalTo: pillContainer.centerYAnchor),
-            
-            addressField.leadingAnchor.constraint(equalTo: lockIcon.trailingAnchor, constant: 6),
-            addressField.trailingAnchor.constraint(equalTo: pillContainer.trailingAnchor, constant: -8),
+            pillContainer.heightAnchor.constraint(equalToConstant: 32),
+
+            securityIcon.leadingAnchor.constraint(equalTo: pillContainer.leadingAnchor, constant: 10),
+            securityIcon.centerYAnchor.constraint(equalTo: pillContainer.centerYAnchor),
+            securityIcon.widthAnchor.constraint(equalToConstant: 13),
+            securityIcon.heightAnchor.constraint(equalToConstant: 13),
+
+            addressField.leadingAnchor.constraint(equalTo: securityIcon.trailingAnchor, constant: 8),
+            addressField.trailingAnchor.constraint(equalTo: pillContainer.trailingAnchor, constant: -10),
             addressField.centerYAnchor.constraint(equalTo: pillContainer.centerYAnchor),
-            
+
             progressBar.leadingAnchor.constraint(equalTo: pillContainer.leadingAnchor, constant: 2),
             progressBar.trailingAnchor.constraint(equalTo: pillContainer.trailingAnchor, constant: -2),
             progressBar.bottomAnchor.constraint(equalTo: pillContainer.bottomAnchor),
             progressBar.heightAnchor.constraint(equalToConstant: 2),
-            
-            // Right controls
+
             installExtBtn.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
             installExtBtn.centerYAnchor.constraint(equalTo: centerYAnchor),
-            installExtBtn.widthAnchor.constraint(equalToConstant: 32),
-            installExtBtn.heightAnchor.constraint(equalToConstant: 28),
-            
-            adBlockBtn.trailingAnchor.constraint(equalTo: installExtBtn.leadingAnchor, constant: -6),
+            installExtBtn.widthAnchor.constraint(equalToConstant: 30),
+            installExtBtn.heightAnchor.constraint(equalToConstant: 30),
+
+            adBlockBtn.trailingAnchor.constraint(equalTo: installExtBtn.leadingAnchor, constant: -3),
             adBlockBtn.centerYAnchor.constraint(equalTo: centerYAnchor),
-            adBlockBtn.widthAnchor.constraint(equalToConstant: 32),
-            adBlockBtn.heightAnchor.constraint(equalToConstant: 28),
-            
-            brambleBtn.trailingAnchor.constraint(equalTo: adBlockBtn.leadingAnchor, constant: -6),
+            adBlockBtn.widthAnchor.constraint(equalToConstant: 30),
+            adBlockBtn.heightAnchor.constraint(equalToConstant: 30),
+
+            brambleBtn.trailingAnchor.constraint(equalTo: adBlockBtn.leadingAnchor, constant: -3),
             brambleBtn.centerYAnchor.constraint(equalTo: centerYAnchor),
-            brambleBtn.widthAnchor.constraint(equalToConstant: 32),
-            brambleBtn.heightAnchor.constraint(equalToConstant: 28),
+            brambleBtn.widthAnchor.constraint(equalToConstant: 30),
+            brambleBtn.heightAnchor.constraint(equalToConstant: 30),
         ])
     }
-    
-    private func configureButton(_ btn: NSButton, title: String, action: Selector) {
-        btn.title = title
-        btn.bezelStyle = .texturedRounded
-        btn.target = self
-        btn.action = action
-        btn.font = NSFont.systemFont(ofSize: 13)
-        btn.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(btn)
+
+    private func configureButton(_ button: NSButton, symbol: String, label: String, action: Selector) {
+        button.image = NSImage(
+            systemSymbolName: symbol,
+            accessibilityDescription: label
+        )?.withSymbolConfiguration(.init(pointSize: 13, weight: .regular))
+        configureButtonBase(button, label: label, action: action)
+        button.imagePosition = .imageOnly
+        button.contentTintColor = .secondaryLabelColor
     }
-    
+
+    private func configureButton(_ button: NSButton, title: String, label: String, action: Selector) {
+        button.title = title
+        configureButtonBase(button, label: label, action: action)
+        button.font = NSFont.systemFont(ofSize: 15)
+        button.imagePosition = .imageOnly
+    }
+
+    private func configureButtonBase(_ button: NSButton, label: String, action: Selector) {
+        button.bezelStyle = .toolbar
+        button.isBordered = false
+        button.target = self
+        button.action = action
+        button.toolTip = label
+        button.setAccessibilityLabel(label)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(button)
+    }
+
     public func updateForTab(_ tab: TabItem) {
         backBtn.isEnabled = tab.webView.canGoBack
         forwardBtn.isEnabled = tab.webView.canGoForward
-        reloadBtn.title = tab.isLoading ? "✕" : "⟳"
-        
+
+        let reloadSymbol = tab.isLoading ? "xmark" : "arrow.clockwise"
+        reloadBtn.image = NSImage(
+            systemSymbolName: reloadSymbol,
+            accessibilityDescription: tab.isLoading ? "Stop Loading" : "Reload"
+        )?.withSymbolConfiguration(.init(pointSize: 13, weight: .regular))
+        reloadBtn.toolTip = tab.isLoading ? "Stop Loading" : "Reload"
+
         if let url = tab.url {
-            let isHttps = url.scheme == "https"
-            lockIcon.stringValue = isHttps ? "🔒" : "⚠️"
-            lockIcon.textColor = isHttps ? .secondaryLabelColor : .systemYellow
+            let secure = url.scheme == "https"
+            let symbol = secure ? "lock.fill" : (url.scheme == "http" ? "exclamationmark.triangle.fill" : "globe")
+            securityIcon.image = NSImage(
+                systemSymbolName: symbol,
+                accessibilityDescription: secure ? "Secure Connection" : "Connection"
+            )
+            securityIcon.contentTintColor = secure ? .secondaryLabelColor : (url.scheme == "http" ? .systemYellow : .secondaryLabelColor)
             addressField.stringValue = url.absoluteString
         } else {
-            lockIcon.stringValue = "🌐"
+            securityIcon.image = NSImage(systemSymbolName: "globe", accessibilityDescription: "Address")
+            securityIcon.contentTintColor = .secondaryLabelColor
             addressField.stringValue = ""
         }
-        
+
         let progress = tab.webView.estimatedProgress
         if tab.isLoading && progress < 1.0 {
             progressBar.isHidden = false
@@ -190,17 +210,17 @@ public final class OmniboxView: NSVisualEffectView, NSTextFieldDelegate {
             progressBar.isHidden = true
         }
     }
-    
+
     public func focusAddressField() {
         window?.makeFirstResponder(addressField)
         addressField.currentEditor()?.selectAll(nil)
     }
-    
+
     @objc private func onFieldSubmit() {
         let input = addressField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         delegate?.omniboxDidSubmit(input: input)
     }
-    
+
     @objc private func onToggleSidebar() { delegate?.omniboxDidToggleSidebar() }
     @objc private func onBack() { delegate?.omniboxDidClickBack() }
     @objc private func onForward() { delegate?.omniboxDidClickForward() }
