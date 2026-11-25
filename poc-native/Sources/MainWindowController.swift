@@ -42,6 +42,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     private func setupUI() {
         guard let window = window, let contentView = window.contentView else { return }
         contentView.wantsLayer = true
+        contentView.layer?.backgroundColor = NSColor(red: 0.055, green: 0.06, blue: 0.075, alpha: 1).cgColor
         
         // 1. Unified root glass background (seamless single frame across entire window)
         let rootGlass = NSVisualEffectView()
@@ -121,6 +122,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     
     private func setupProgressObserver() {
         guard let active = TabManager.shared.activeTab else { return }
+        progressObservation?.invalidate()
         progressObservation = active.webView.observe(\.estimatedProgress, options: [.new]) { [weak self] _, _ in
             DispatchQueue.main.async {
                 if let tab = TabManager.shared.activeTab {
@@ -178,6 +180,8 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     }
     
     public func tabManagerDidChangeActiveTab(to tab: TabItem) {
+        progressObservation?.invalidate()
+        progressObservation = nil
         webContainerView.subviews.forEach { $0.removeFromSuperview() }
         
         tab.webView.translatesAutoresizingMaskIntoConstraints = false
@@ -304,6 +308,9 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     public func sidebarDidCloseTab(id: UUID) { TabManager.shared.closeTab(id: id) }
     public func sidebarDidCreateNewTab() { _ = TabManager.shared.createTab() }
     public func sidebarDidTogglePinTab(id: UUID) { TabManager.shared.togglePinned(id: id) }
+    public func sidebarDidOpenExtensions() { showExtensionInstallSheet() }
+    public func sidebarDidOpenSettings() { menuOpenSettings() }
+    public func sidebarDidQuit() { NSApp.terminate(nil) }
 
     private func runTouchIDTest() {
         BrambleNativeBridge.shared.authenticateWithBiometrics { success, error in
