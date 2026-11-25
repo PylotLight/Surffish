@@ -276,7 +276,7 @@ public final class OmniboxView: NSVisualEffectView, NSTextFieldDelegate {
         zoomButton.isHidden = !supportsZoom
         zoomButton.title = "\(Int((zoom * 100).rounded()))%"
         zoomButton.toolTip = "Page zoom — click to reset to 100%"
-        zoomButton.accessibilityLabel = zoomButton.toolTip
+        zoomButton.setAccessibilityLabel("Page zoom — click to reset to 100%")
         backBtn.isEnabled = tab.webView.canGoBack
         forwardBtn.isEnabled = tab.webView.canGoForward
         let activeURL = tab.webView.url ?? tab.url

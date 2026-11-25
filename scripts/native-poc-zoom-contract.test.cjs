@@ -33,6 +33,7 @@ test("omnibox exposes reset indicator and settings can reset all saved zoom", ()
   assert.match(omnibox, /zoomButton\.title = "\\\(Int\(\(zoom \* 100\)/);
   assert.match(omnibox, /onResetZoom/);
   assert.match(omnibox, /Page zoom — click to reset to 100%/);
+  assert.match(omnibox, /zoomButton\.setAccessibilityLabel\(/);
   assert.match(settings, /func resetAllPageZoom\(\)/);
   assert.match(settings, /BrowserPageZoomStore\.shared\.clearAll\(\)/);
   assert.match(settings, /Reset all saved page zoom/);
