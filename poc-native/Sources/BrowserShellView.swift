@@ -6,6 +6,7 @@ import SwiftUI
 @Observable
 public final class BrowserShellLayoutModel {
     public var sidebarWidth: CGFloat = 280
+    public var onSidebarWidthChanged: ((CGFloat) -> Void)?
     public var onSidebarWidthCommitted: ((CGFloat) -> Void)?
 
     public init() {}
@@ -59,6 +60,9 @@ public struct BrowserShellView: View {
         .background(Color.clear)
         .ignoresSafeArea()
         .animation(.timingCurve(0.16, 1, 0.3, 1, duration: 0.34), value: layout.sidebarWidth)
+        .onChange(of: layout.sidebarWidth) { _, width in
+            layout.onSidebarWidthChanged?(width)
+        }
     }
 
     private var sidebarResizeHandle: some View {

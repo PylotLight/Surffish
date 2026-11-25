@@ -44,6 +44,7 @@ private final class SidebarViewModel {
     var isExpanded = true
     var isPinned = false
     var isFocused = false
+    var panelWidth: CGFloat = 280
     var onHoverChange: ((Bool) -> Void)?
     var onFocusChange: ((Bool) -> Void)?
 
@@ -165,6 +166,10 @@ public final class SidebarView: NSView {
         model.isPinned = pinned
     }
 
+    public func setPanelWidth(_ width: CGFloat) {
+        model.panelWidth = max(width, CGFloat(BrowserSettings.minimumSidebarWidth))
+    }
+
     public func reloadTabs() { model.refresh() }
 
     public func showTabs() { model.show(.tabs) }
@@ -187,7 +192,6 @@ private struct NativeSidebarRootView: View {
 
     private let railWidth: CGFloat = 64
     private var showsTabRail: Bool { model.contentMode == .tabs && !model.isExpanded }
-    private let panelWidth: CGFloat = 280
 
     var body: some View {
         HStack(spacing: 0) {
@@ -197,7 +201,7 @@ private struct NativeSidebarRootView: View {
                     .transition(.opacity)
             } else {
                 expandedPanel
-                    .frame(width: panelWidth)
+                    .frame(width: model.panelWidth)
                     .transition(.asymmetric(
                         insertion: .move(edge: .leading).combined(with: .opacity),
                         removal: .move(edge: .leading).combined(with: .opacity)

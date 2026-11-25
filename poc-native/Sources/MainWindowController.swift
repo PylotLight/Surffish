@@ -153,9 +153,13 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
         isSidebarPinned = savedSettings.sidebarPinned
         isSidebarVisible = savedSettings.showSidebarAtStartup
         shellLayoutModel.sidebarWidth = sidebarWidth
+        shellLayoutModel.onSidebarWidthChanged = { [weak self] width in
+            self?.sidebarView.setPanelWidth(width)
+        }
         shellLayoutModel.onSidebarWidthCommitted = { [weak self] width in
             self?.sidebarWidthDidChange(width)
         }
+        sidebarView.setPanelWidth(sidebarWidth)
         sidebarView.setPinned(isSidebarPinned)
         shellHostingView = NSHostingView(rootView: BrowserShellView(
             layout: shellLayoutModel,
@@ -436,16 +440,19 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
     public func omniboxDidShowHistory() {
         revealSidebarForLibrary()
         sidebarView.showHistory()
+        updateSidebarWidth(animated: true)
     }
 
     public func omniboxDidShowBookmarks() {
         revealSidebarForLibrary()
         sidebarView.showBookmarks()
+        updateSidebarWidth(animated: true)
     }
 
     public func omniboxDidShowReadingList() {
         revealSidebarForLibrary()
         sidebarView.showReadingList()
+        updateSidebarWidth(animated: true)
     }
 
     public func omniboxDidToggleBookmark() {
@@ -518,6 +525,7 @@ public final class MainWindowController: NSWindowController, NSWindowDelegate, N
         let expanded = isSidebarVisible || isSidebarPinned || isSidebarHovered || isSidebarFocused
             || isSidebarRevealRequested || sidebarView.requiresExpandedPanel
         shellLayoutModel.sidebarWidth = expanded ? sidebarWidth : collapsedSidebarWidth
+        sidebarView.setPanelWidth(shellLayoutModel.sidebarWidth)
         sidebarView.setCollapsed(!expanded)
         window?.contentView?.layoutSubtreeIfNeeded()
     }

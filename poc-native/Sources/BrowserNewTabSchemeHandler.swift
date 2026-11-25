@@ -87,6 +87,11 @@ public final class BrowserNewTabSchemeHandler: NSObject, WKURLSchemeHandler {
         case .bookmarks:
             sites = bookmarkLinks
             sectionTitle = "Bookmarks"
+        case .custom:
+            sites = Array(settings.customQuickLinks.prefix(12)).compactMap {
+                SiteLink(title: $0.title, url: $0.url)
+            }
+            sectionTitle = "Your shortcuts"
         }
         let links = sites.map { site in
             let label = escapeHTML(site.title.isEmpty ? (site.url.host ?? site.url.absoluteString) : site.title)
@@ -95,8 +100,11 @@ public final class BrowserNewTabSchemeHandler: NSObject, WKURLSchemeHandler {
             let href = escapeHTML(site.url.absoluteString)
             return "<a class=\"site\" href=\"\(href)\"><span class=\"site-mark\" aria-hidden=\"true\">\(initial)</span><span class=\"site-copy\"><strong>\(label)</strong><small>\(host)</small></span></a>"
         }.joined(separator: "\n")
+        let emptyMessage = settings.newTabSiteSource == .custom
+            ? "Add custom shortcuts in Settings → Appearance to see them here."
+            : "Bookmark a page or visit a site and it will be easy to find here."
         let emptyState = sites.isEmpty
-            ? "<p class=\"empty\">Bookmark a page or visit a site and it will be easy to find here.</p>"
+            ? "<p class=\"empty\">\(escapeHTML(emptyMessage))</p>"
             : ""
         let engine = settings.searchEngine
         let marker = "SURFFISHQUERYTOKEN"

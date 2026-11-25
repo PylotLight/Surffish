@@ -269,3 +269,52 @@ test("native back and forward buttons expose each tab's WebKit history on right-
   assert.match(toolbar, /webView\.go\(to: item\)/);
   assert.match(toolbar, /right-click for history/);
 });
+
+test("native Settings uses searchable section navigation without implying unsupported controls", () => {
+  const settings = read("poc-native/Sources/BrowserSettingsView.swift");
+
+  assert.match(settings, /case appearance = "Appearance"/);
+  assert.match(settings, /TextField\("Search settings", text: \$settingsSearchQuery\)/);
+  assert.match(settings, /filteredSearchEntries/);
+  assert.match(settings, /No supported settings match/);
+  assert.match(settings, /case \.appearance: appearancePage/);
+  assert.doesNotMatch(settings, /pickerStyle\(\.segmented\)/);
+  assert.match(settings, /New Tab shortcuts/);
+  assert.match(settings, /AdBlockManager\.shared\.setEnabled/);
+  assert.match(settings, /WebExtensionManager\.shared\.uninstallExtension/);
+});
+
+test("custom New Tab shortcuts are validated, profile-persisted, rendered, and refreshed on apply", () => {
+  const settings = read("poc-native/Sources/BrowserSettingsView.swift");
+  const store = read("poc-native/Sources/BrowserSettingsStore.swift");
+  const page = read("poc-native/Sources/BrowserNewTabSchemeHandler.swift");
+  const window = read("poc-native/Sources/MainWindowController.swift");
+
+  assert.match(store, /struct BrowserNewTabQuickLink: Codable, Identifiable, Hashable/);
+  assert.match(store, /customQuickLinks: \[BrowserNewTabQuickLink\]/);
+  assert.match(store, /decodeIfPresent\(\[BrowserNewTabQuickLink\]\.self, forKey: \.customQuickLinks\) \?\? \[\]/);
+  assert.match(store, /case custom/);
+  assert.match(settings, /func addCustomQuickLink\(\)/);
+  assert.match(settings, /\["http", "https"\]\.contains\(scheme\)/);
+  assert.match(settings, /components\.user == nil, components\.password == nil/);
+  assert.match(settings, /customQuickLinks\.count < 12/);
+  assert.match(settings, /func removeCustomQuickLink\(id: UUID\)/);
+  assert.match(page, /case \.custom:/);
+  assert.match(page, /settings\.customQuickLinks\.prefix\(12\)/);
+  assert.match(page, /Add custom shortcuts in Settings/);
+  assert.match(page, /includeHistory: !isPrivateTab/);
+  assert.match(window, /tab\.webView\.reload\(\)/);
+});
+
+test("expanded sidebar content follows the live resizable shell width", () => {
+  const sidebar = read("poc-native/Sources/SidebarView.swift");
+  const shell = read("poc-native/Sources/BrowserShellView.swift");
+  const window = read("poc-native/Sources/MainWindowController.swift");
+
+  assert.match(sidebar, /var panelWidth: CGFloat = 280/);
+  assert.match(sidebar, /func setPanelWidth\(_ width: CGFloat\)/);
+  assert.match(sidebar, /expandedPanel\s*\.frame\(width: model\.panelWidth\)/);
+  assert.doesNotMatch(sidebar, /private let panelWidth: CGFloat = 280/);
+  assert.match(shell, /onSidebarWidthChanged/);
+  assert.match(window, /sidebarView\.setPanelWidth\(shellLayoutModel\.sidebarWidth\)/);
+});

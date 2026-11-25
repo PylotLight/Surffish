@@ -5,12 +5,32 @@ import WebKit
 
 private enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
     case general = "General"
+    case appearance = "Appearance"
     case privacy = "Privacy"
     case extensions = "Extensions"
     case connection = "Connection"
     case about = "About"
 
     var id: String { rawValue }
+
+    var symbol: String {
+        switch self {
+        case .general: return "slider.horizontal.3"
+        case .appearance: return "paintbrush"
+        case .privacy: return "hand.raised"
+        case .extensions: return "puzzlepiece.extension"
+        case .connection: return "network"
+        case .about: return "info.circle"
+        }
+    }
+}
+
+private struct SettingsSearchEntry: Identifiable {
+    let id: String
+    let title: String
+    let detail: String
+    let section: SettingsSection
+    let terms: String
 }
 
 @MainActor
@@ -24,6 +44,9 @@ public final class BrowserSettingsModel {
     public var sidebarWidth: Double
     public var newTabTheme: NewTabTheme
     public var newTabSiteSource: NewTabSiteSource
+    public var customQuickLinks: [BrowserNewTabQuickLink]
+    public var newQuickLinkTitle = ""
+    public var newQuickLinkURL = ""
     public var adBlockingEnabled: Bool
     public var sshProxyEnabled: Bool
     public var sshHost: String
@@ -56,6 +79,7 @@ public final class BrowserSettingsModel {
         sidebarWidth = Double(settings.sidebarWidth)
         newTabTheme = settings.newTabTheme
         newTabSiteSource = settings.newTabSiteSource
+        customQuickLinks = settings.customQuickLinks
         adBlockingEnabled = settings.adBlockingEnabled
         sshProxyEnabled = settings.sshProxyEnabled
         sshHost = settings.sshHost
@@ -74,6 +98,39 @@ public final class BrowserSettingsModel {
 
     public var pendingUninstall: LoadedExtensionInfo? {
         extensions.first { $0.id == pendingUninstallID }
+    }
+
+    public func addCustomQuickLink() {
+        let title = newQuickLinkTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let rawURL = newQuickLinkURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else {
+            showAlert(title: "Shortcut title required", message: "Enter a short name for the New Tab shortcut.")
+            return
+        }
+        guard let components = URLComponents(string: rawURL),
+              let scheme = components.scheme?.lowercased(),
+              ["http", "https"].contains(scheme),
+              let host = components.host, !host.isEmpty,
+              components.user == nil, components.password == nil,
+              let url = components.url else {
+            showAlert(title: "Invalid shortcut URL", message: "Use a complete HTTP or HTTPS address, such as https://example.com.")
+            return
+        }
+        guard customQuickLinks.count < 12 else {
+            showAlert(title: "Shortcut limit reached", message: "New Tab supports up to 12 custom shortcuts.")
+            return
+        }
+        guard !customQuickLinks.contains(where: { $0.url.caseInsensitiveCompare(url.absoluteString) == .orderedSame }) else {
+            showAlert(title: "Shortcut already added", message: "Each custom shortcut must use a different URL.")
+            return
+        }
+        customQuickLinks.append(BrowserNewTabQuickLink(title: title, url: url.absoluteString))
+        newQuickLinkTitle = ""
+        newQuickLinkURL = ""
+    }
+
+    public func removeCustomQuickLink(id: UUID) {
+        customQuickLinks.removeAll { $0.id == id }
     }
 
     public func searchSSHHosts() {
@@ -117,6 +174,33 @@ public final class BrowserSettingsModel {
         next.sidebarWidth = min(max(Int(sidebarWidth.rounded()), BrowserSettings.minimumSidebarWidth), BrowserSettings.maximumSidebarWidth)
         next.newTabTheme = newTabTheme
         next.newTabSiteSource = newTabSiteSource
+        guard customQuickLinks.count <= 12 else {
+            showAlert(title: "Too many shortcuts", message: "New Tab supports up to 12 custom shortcuts.")
+            return
+        }
+        var normalizedLinks: [BrowserNewTabQuickLink] = []
+        var linkURLs = Set<String>()
+        for link in customQuickLinks {
+            let title = link.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let rawURL = link.url.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty,
+                  let components = URLComponents(string: rawURL),
+                  let scheme = components.scheme?.lowercased(),
+                  ["http", "https"].contains(scheme),
+                  let host = components.host, !host.isEmpty,
+                  components.user == nil, components.password == nil,
+                  let url = components.url else {
+                showAlert(title: "Invalid custom shortcut", message: "Every shortcut needs a title and a complete HTTP or HTTPS address without embedded credentials.")
+                return
+            }
+            let canonicalURL = url.absoluteString
+            guard linkURLs.insert(canonicalURL.lowercased()).inserted else {
+                showAlert(title: "Duplicate custom shortcut", message: "Each custom shortcut must use a different URL.")
+                return
+            }
+            normalizedLinks.append(BrowserNewTabQuickLink(id: link.id, title: title, url: canonicalURL))
+        }
+        next.customQuickLinks = normalizedLinks
         next.adBlockingEnabled = adBlockingEnabled
         next.sshProxyEnabled = sshProxyEnabled
         next.sshProxyShareEnabled = sshProxyShareEnabled
@@ -201,57 +285,142 @@ public final class BrowserSettingsModel {
 public struct BrowserSettingsView: View {
     @Bindable var model: BrowserSettingsModel
     @State private var selectedSection: SettingsSection = .general
+    @State private var settingsSearchQuery = ""
 
     public init(model: BrowserSettingsModel) { self.model = model }
 
+    private var searchEntries: [SettingsSearchEntry] {
+        [
+            .init(id: "search-engine", title: "Search engine", detail: "Choose DuckDuckGo, Google or Bing", section: .general, terms: "search engine provider web query"),
+            .init(id: "start-page", title: "New Tab page", detail: "Set the startup and new-tab destination", section: .general, terms: "startup home page url new tab"),
+            .init(id: "restore-session", title: "Restore previous session", detail: "Reopen tabs from the last session", section: .general, terms: "startup restore tabs session"),
+            .init(id: "sidebar-startup", title: "Sidebar visibility", detail: "Choose whether the sidebar opens at startup", section: .general, terms: "sidebar startup show"),
+            .init(id: "sidebar-pinned", title: "Keep sidebar open", detail: "Keep the sidebar expanded when the pointer leaves", section: .general, terms: "sidebar pin keep open hover"),
+            .init(id: "sidebar-width", title: "Sidebar width", detail: "Adjust the sidebar between 220 and 440 points", section: .general, terms: "sidebar resize width size"),
+            .init(id: "newtab-theme", title: "New Tab background", detail: "Choose one of the built-in color themes", section: .appearance, terms: "appearance theme background color new tab"),
+            .init(id: "newtab-links", title: "New Tab shortcuts", detail: "Choose a source or manage custom shortcuts", section: .appearance, terms: "quick links favorites bookmarks pinned recent custom new tab"),
+            .init(id: "ad-blocking", title: "Advertising and tracking", detail: "Enable the built-in WebKit content rules", section: .privacy, terms: "privacy ad blocker tracking content rules"),
+            .init(id: "site-data", title: "Website data", detail: "Clear cookies, caches and storage for this profile", section: .privacy, terms: "privacy cookies cache storage clear site data"),
+            .init(id: "extensions", title: "Extensions", detail: "Install or remove profile extensions", section: .extensions, terms: "extensions add install remove webkit bramble"),
+            .init(id: "ssh-route", title: "Browser proxy routing", detail: "Route browser traffic through the SSH tunnel", section: .connection, terms: "network proxy ssh socks5 route browser"),
+            .init(id: "ssh-host", title: "SSH host", detail: "Choose a saved SSH alias or enter user@host", section: .connection, terms: "network proxy ssh host alias nas"),
+            .init(id: "socks-port", title: "SOCKS5 port and sharing", detail: "Configure the local endpoint and optional LAN access", section: .connection, terms: "network proxy socks5 port listen address lan share"),
+            .init(id: "profile", title: "Profile and engine", detail: "View profile storage and the native WebKit engine", section: .about, terms: "about profile storage engine webkit platform version")
+        ]
+    }
+
+    private var filteredSearchEntries: [SettingsSearchEntry] {
+        let query = settingsSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return [] }
+        return searchEntries.filter {
+            $0.title.localizedCaseInsensitiveContains(query)
+                || $0.detail.localizedCaseInsensitiveContains(query)
+                || $0.terms.localizedCaseInsensitiveContains(query)
+        }
+    }
+
     public var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
+        HStack(alignment: .top, spacing: 18) {
+            VStack(alignment: .leading, spacing: 14) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Settings").font(.system(size: 25, weight: .semibold))
                     Text("Native browser preferences for this profile")
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                 }
-                Spacer()
-                Button("Done") { model.onClose?() }
-                    .keyboardShortcut(.cancelAction)
-            }
-
-            Picker("Settings section", selection: $selectedSection) {
-                ForEach(SettingsSection.allCases) { section in
-                    Text(section.rawValue).tag(section)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    switch selectedSection {
-                    case .general: generalPage
-                    case .privacy: privacyPage
-                    case .extensions: extensionsPage
-                    case .connection: connectionPage
-                    case .about: aboutPage
+                HStack(spacing: 7) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.tertiary)
+                    TextField("Search settings", text: $settingsSearchQuery)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12))
+                        .accessibilityLabel("Search settings")
+                    if !settingsSearchQuery.isEmpty {
+                        Button { settingsSearchQuery = "" } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.tertiary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Clear settings search")
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 3)
-            }
-            .scrollIndicators(.visible)
+                .padding(.horizontal, 9)
+                .frame(height: 32)
+                .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 9))
 
-            HStack {
-                Text(model.saveStatus)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                if selectedSection == .connection {
-                    Button("Copy local SOCKS5 address") { model.copyProxyAddress() }
+                ScrollView {
+                    VStack(spacing: 4) {
+                        ForEach(SettingsSection.allCases) { section in
+                            Button {
+                                selectedSection = section
+                                settingsSearchQuery = ""
+                            } label: {
+                                Label(section.rawValue, systemImage: section.symbol)
+                                    .font(.system(size: 12, weight: selectedSection == section ? .semibold : .regular))
+                                    .foregroundStyle(selectedSection == section ? .primary : .secondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, 10)
+                                    .frame(height: 34)
+                                    .background(
+                                        selectedSection == section ? Color.accentColor.opacity(0.20) : Color.clear,
+                                        in: RoundedRectangle(cornerRadius: 9)
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityAddTraits(selectedSection == section ? .isSelected : [])
+                        }
+                    }
                 }
-                Button("Save & Apply") { model.saveSettings() }
-                    .keyboardShortcut(.defaultAction)
+                .scrollIndicators(.hidden)
+                Spacer(minLength: 0)
             }
+            .frame(width: 190, alignment: .topLeading)
+            .frame(maxHeight: .infinity, alignment: .topLeading)
+            .overlay(alignment: .trailing) {
+                Rectangle().fill(Color.white.opacity(0.08)).frame(width: 1)
+            }
+
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(selectedSection.rawValue).font(.system(size: 20, weight: .semibold))
+                        Text(sectionSubtitle)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Done") { model.onClose?() }
+                        .keyboardShortcut(.cancelAction)
+                }
+
+                if settingsSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 14) {
+                            selectedPage
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 3)
+                    }
+                    .scrollIndicators(.visible)
+                } else {
+                    settingsSearchResults
+                }
+
+                HStack {
+                    Text(model.saveStatus)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    if selectedSection == .connection && settingsSearchQuery.isEmpty {
+                        Button("Copy local SOCKS5 address") { model.copyProxyAddress() }
+                    }
+                    Button("Save & Apply") { model.saveSettings() }
+                        .keyboardShortcut(.defaultAction)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .padding(26)
         .background(Color(nsColor: NSColor(red: 0.075, green: 0.08, blue: 0.095, alpha: 1)))
@@ -275,54 +444,181 @@ public struct BrowserSettingsView: View {
         }
     }
 
-    private var generalPage: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            GroupBox("Browser") {
-                VStack(alignment: .leading, spacing: 12) {
-                    Picker("Search engine", selection: $model.searchEngine) {
-                        ForEach(BrowserSearchEngine.allCases, id: \.self) { engine in
-                            Text(engine.displayName).tag(engine)
+    private var sectionSubtitle: String {
+        switch selectedSection {
+        case .general: return "Browser startup, search and sidebar behavior"
+        case .appearance: return "Built-in New Tab themes and shortcuts"
+        case .privacy: return "Profile data and native content rules"
+        case .extensions: return "WebKit extensions installed in this profile"
+        case .connection: return "Managed SSH and local SOCKS5 routing"
+        case .about: return "Native engine and profile details"
+        }
+    }
+
+    private var newTabSourceDescription: String {
+        switch model.newTabSiteSource {
+        case .automatic: return "Automatic prefers pinned sites, then recent sites, then bookmarks. Recent history is hidden in private tabs."
+        case .pinned: return "Only pinned sites are shown."
+        case .recent: return "Recently visited sites are hidden in private tabs."
+        case .bookmarks: return "Your saved bookmarks are shown as quick links."
+        case .custom: return "Only your custom shortcuts are shown on New Tab."
+        }
+    }
+
+    @ViewBuilder
+    private var selectedPage: some View {
+        switch selectedSection {
+        case .general: generalPage
+        case .appearance: appearancePage
+        case .privacy: privacyPage
+        case .extensions: extensionsPage
+        case .connection: connectionPage
+        case .about: aboutPage
+        }
+    }
+
+    private var settingsSearchResults: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 9) {
+                Text(filteredSearchEntries.isEmpty
+                     ? "No supported settings match ‘\(settingsSearchQuery)’"
+                     : "\(filteredSearchEntries.count) matching settings")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .padding(.bottom, 3)
+                ForEach(filteredSearchEntries) { entry in
+                    Button {
+                        selectedSection = entry.section
+                        settingsSearchQuery = ""
+                    } label: {
+                        HStack(alignment: .top, spacing: 11) {
+                            Image(systemName: entry.section.symbol)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(Color.accentColor)
+                                .frame(width: 20)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(entry.title).font(.system(size: 12, weight: .semibold))
+                                Text(entry.detail).font(.system(size: 11)).foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 4)
+                            Text(entry.section.rawValue)
+                                .font(.system(size: 10))
+                                .foregroundStyle(.tertiary)
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(11)
+                        .background(Color.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 10))
+                        .contentShape(RoundedRectangle(cornerRadius: 10))
                     }
-                    TextField("New tab page URL", text: $model.startPage)
-                        .textFieldStyle(.roundedBorder)
-                    Toggle("Restore tabs from the previous session", isOn: $model.restoreSession)
-                    Toggle("Show the sidebar at startup", isOn: $model.showSidebarAtStartup)
-                    Toggle("Keep the sidebar open when the pointer leaves", isOn: $model.sidebarPinned)
-                    VStack(alignment: .leading, spacing: 5) {
-                        HStack {
-                            Text("Sidebar width")
-                            Spacer()
-                            Text("\(Int(model.sidebarWidth.rounded())) px")
-                                .foregroundStyle(.secondary)
-                                .monospacedDigit()
-                        }
-                        Slider(
-                            value: $model.sidebarWidth,
-                            in: Double(BrowserSettings.minimumSidebarWidth)...Double(BrowserSettings.maximumSidebarWidth),
-                            step: 10
-                        )
-                        .accessibilityLabel("Sidebar width")
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .scrollIndicators(.visible)
+    }
+
+    private var generalPage: some View {
+        GroupBox("Browser") {
+            VStack(alignment: .leading, spacing: 12) {
+                Picker("Search engine", selection: $model.searchEngine) {
+                    ForEach(BrowserSearchEngine.allCases, id: \.self) { engine in
+                        Text(engine.displayName).tag(engine)
                     }
                 }
-                .padding(.top, 6)
+                TextField("New tab page URL", text: $model.startPage)
+                    .textFieldStyle(.roundedBorder)
+                Toggle("Restore tabs from the previous session", isOn: $model.restoreSession)
+                Toggle("Show the sidebar at startup", isOn: $model.showSidebarAtStartup)
+                Toggle("Keep the sidebar open when the pointer leaves", isOn: $model.sidebarPinned)
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack {
+                        Text("Sidebar width")
+                        Spacer()
+                        Text("\(Int(model.sidebarWidth.rounded())) pt")
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                    Slider(
+                        value: $model.sidebarWidth,
+                        in: Double(BrowserSettings.minimumSidebarWidth)...Double(BrowserSettings.maximumSidebarWidth),
+                        step: 10
+                    )
+                    .accessibilityLabel("Sidebar width")
+                }
             }
+            .padding(.top, 6)
+        }
+    }
 
-            GroupBox("New Tab appearance and shortcuts") {
+    private var appearancePage: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            GroupBox("New Tab look and links") {
                 VStack(alignment: .leading, spacing: 12) {
                     Picker("Background", selection: $model.newTabTheme) {
                         ForEach(NewTabTheme.allCases) { theme in
                             Text(theme.displayName).tag(theme)
                         }
                     }
-                    Picker("Quick links", selection: $model.newTabSiteSource) {
+                    Picker("Quick link source", selection: $model.newTabSiteSource) {
                         ForEach(NewTabSiteSource.allCases) { source in
                             Text(source.displayName).tag(source)
                         }
                     }
-                    Text("Automatic prefers pinned sites, then recent sites, then bookmarks. Recent history is always hidden in private tabs.")
+                    Text(newTabSourceDescription)
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.top, 6)
+            }
+
+            GroupBox("Custom shortcuts") {
+                VStack(alignment: .leading, spacing: 10) {
+                    if model.customQuickLinks.isEmpty {
+                        Text("No custom shortcuts yet. Add a title and website below, then choose Custom shortcuts as the New Tab source.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    ForEach($model.customQuickLinks) { $link in
+                        HStack(alignment: .center, spacing: 9) {
+                            VStack(spacing: 6) {
+                                TextField("Shortcut title", text: $link.title)
+                                    .textFieldStyle(.roundedBorder)
+                                TextField("https://example.com", text: $link.url)
+                                    .textFieldStyle(.roundedBorder)
+                                    .font(.system(size: 11, design: .monospaced))
+                            }
+                            Button(role: .destructive) {
+                                model.removeCustomQuickLink(id: link.id)
+                            } label: {
+                                Image(systemName: "trash")
+                            }
+                            .buttonStyle(.borderless)
+                            .help("Remove shortcut")
+                            .accessibilityLabel("Remove \(link.title.isEmpty ? "shortcut" : link.title)")
+                        }
+                        .padding(.vertical, 2)
+                    }
+                    Divider()
+                    VStack(alignment: .leading, spacing: 8) {
+                        TextField("Shortcut title", text: $model.newQuickLinkTitle)
+                            .textFieldStyle(.roundedBorder)
+                        TextField("https://example.com", text: $model.newQuickLinkURL)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 11, design: .monospaced))
+                        HStack {
+                            Text("\(model.customQuickLinks.count) of 12 shortcuts")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Button("Add shortcut") { model.addCustomQuickLink() }
+                                .disabled(model.customQuickLinks.count >= 12)
+                        }
+                    }
+                    Text("Only complete HTTP or HTTPS addresses are accepted. Changes are saved with Save & Apply and stay within this app profile.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.top, 6)

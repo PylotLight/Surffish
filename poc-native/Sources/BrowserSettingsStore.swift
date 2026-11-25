@@ -64,6 +64,7 @@ public enum NewTabSiteSource: String, CaseIterable, Codable, Identifiable, Hasha
     case pinned
     case recent
     case bookmarks
+    case custom
 
     public var id: String { rawValue }
 
@@ -73,7 +74,20 @@ public enum NewTabSiteSource: String, CaseIterable, Codable, Identifiable, Hasha
         case .pinned: return "Pinned sites"
         case .recent: return "Recently visited"
         case .bookmarks: return "Bookmarks"
+        case .custom: return "Custom shortcuts"
         }
+    }
+}
+
+public struct BrowserNewTabQuickLink: Codable, Identifiable, Hashable {
+    public var id: UUID
+    public var title: String
+    public var url: String
+
+    public init(id: UUID = UUID(), title: String, url: String) {
+        self.id = id
+        self.title = title
+        self.url = url
     }
 }
 
@@ -93,11 +107,12 @@ public struct BrowserSettings: Codable {
     public var adBlockingEnabled: Bool
     public var newTabTheme: NewTabTheme
     public var newTabSiteSource: NewTabSiteSource
+    public var customQuickLinks: [BrowserNewTabQuickLink]
 
     private enum CodingKeys: String, CodingKey {
         case version, searchEngine, startPage, restoreSession, showSidebarAtStartup, sidebarPinned, sidebarWidth
         case sshProxyEnabled, sshHost, sshProxyPort, sshProxyShareEnabled, sshProxyBindAddress, adBlockingEnabled
-        case newTabTheme, newTabSiteSource
+        case newTabTheme, newTabSiteSource, customQuickLinks
     }
 
     public init(
@@ -115,7 +130,8 @@ public struct BrowserSettings: Codable {
         sshProxyBindAddress: String = "127.0.0.1",
         adBlockingEnabled: Bool = false,
         newTabTheme: NewTabTheme = .midnight,
-        newTabSiteSource: NewTabSiteSource = .automatic
+        newTabSiteSource: NewTabSiteSource = .automatic,
+        customQuickLinks: [BrowserNewTabQuickLink] = []
     ) {
         self.version = version
         self.searchEngine = searchEngine
@@ -132,6 +148,7 @@ public struct BrowserSettings: Codable {
         self.adBlockingEnabled = adBlockingEnabled
         self.newTabTheme = newTabTheme
         self.newTabSiteSource = newTabSiteSource
+        self.customQuickLinks = customQuickLinks
     }
 
     public init(from decoder: Decoder) throws {
@@ -152,6 +169,7 @@ public struct BrowserSettings: Codable {
         adBlockingEnabled = try values.decodeIfPresent(Bool.self, forKey: .adBlockingEnabled) ?? false
         newTabTheme = try values.decodeIfPresent(NewTabTheme.self, forKey: .newTabTheme) ?? .midnight
         newTabSiteSource = try values.decodeIfPresent(NewTabSiteSource.self, forKey: .newTabSiteSource) ?? .automatic
+        customQuickLinks = try values.decodeIfPresent([BrowserNewTabQuickLink].self, forKey: .customQuickLinks) ?? []
     }
 
     public static let minimumSidebarWidth = 220
@@ -172,7 +190,8 @@ public struct BrowserSettings: Codable {
         sshProxyBindAddress: "127.0.0.1",
         adBlockingEnabled: false,
         newTabTheme: .midnight,
-        newTabSiteSource: .automatic
+        newTabSiteSource: .automatic,
+        customQuickLinks: []
     )
 
     public var startPageURL: URL {
