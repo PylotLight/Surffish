@@ -6,19 +6,19 @@ public func setupApplicationMenu() {
     // 1. App Menu
     let appMenuItem = NSMenuItem()
     mainMenu.addItem(appMenuItem)
-    let appMenu = NSMenu(title: "Surffish Native")
+    let appMenu = NSMenu(title: "Surffish")
     appMenuItem.submenu = appMenu
     
-    appMenu.addItem(NSMenuItem(title: "About Surffish Native", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: ""))
+    appMenu.addItem(NSMenuItem(title: "About Surffish", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: ""))
     appMenu.addItem(NSMenuItem(title: "Settings…", action: #selector(MainWindowController.menuOpenSettings), keyEquivalent: ","))
     appMenu.addItem(NSMenuItem.separator())
-    appMenu.addItem(NSMenuItem(title: "Hide Surffish Native", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h"))
+    appMenu.addItem(NSMenuItem(title: "Hide Surffish", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h"))
     let hideOthers = NSMenuItem(title: "Hide Others", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
     hideOthers.keyEquivalentModifierMask = [.command, .option]
     appMenu.addItem(hideOthers)
     appMenu.addItem(NSMenuItem(title: "Show All", action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: ""))
     appMenu.addItem(NSMenuItem.separator())
-    appMenu.addItem(NSMenuItem(title: "Quit Surffish Native", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+    appMenu.addItem(NSMenuItem(title: "Quit Surffish", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
     
     // 2. File Menu
     let fileMenuItem = NSMenuItem()
