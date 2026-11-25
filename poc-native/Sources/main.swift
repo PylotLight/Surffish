@@ -3,22 +3,25 @@ import WebKit
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var windowController: MainWindowController?
-    
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
-        
+
         // Setup application menu with Cmd+Q, Cmd+W, Cmd+T, text editing shortcuts
         setupApplicationMenu()
-        
+
         let wc = MainWindowController()
         wc.showWindow(nil)
         wc.window?.makeKeyAndOrderFront(nil)
         self.windowController = wc
-        
+
         NSApp.activate(ignoringOtherApps: true)
-        
-        // Load Real Bramble and extensions
-        let cwd = FileManager.default.currentDirectoryPath
+
+        // Do not instantiate WKWebExtension from the bundled Bramble files during
+        // startup. The current Bramble MV3 manifest triggers a crash inside
+        // WebKit's WKWebExtension initializer on affected macOS builds.
+        // Keep the browser launch path independent of extension parsing until
+        // the manifest has been made WebKit-compatible and tested separately.
         Task { [weak self] in
             let settings = BrowserSettingsStore.shared.settings
             await SshTunnelManager.shared.configure(
@@ -30,13 +33,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 upstreamHost: settings.sshRemoteSocksHost,
                 upstreamPort: settings.sshRemoteSocksPort
             )
-            await WebExtensionManager.shared.loadDefaultExtensions(basePath: cwd)
             await MainActor.run {
                 self?.windowController?.restoreBrowserSession()
             }
         }
     }
-    
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         return true
     }
