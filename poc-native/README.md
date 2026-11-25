@@ -25,7 +25,7 @@ Each profile has a separate Application Support directory under:
 ~/Library/Application Support/SurffishNative/Profiles/Development/
 ```
 
-Settings, sessions, installed extensions and profile website data are isolated. Extensions are downloaded on demand and stored under each profile's `Extensions/` directory; no third-party extension code is bundled in either app. Persistent WebKit stores use distinct stable identifiers; private tabs use non-persistent stores. The two app bundles have distinct bundle identifiers and can run side-by-side.
+Settings, sessions, bookmarks, browsing history, installed extensions and profile website data are isolated. Extensions are downloaded on demand and stored under each profile's `Extensions/` directory; no third-party extension code is bundled in either app. Persistent WebKit stores use distinct stable identifiers; private tabs use non-persistent stores and their visits are not written to history. The two app bundles have distinct bundle identifiers and can run side-by-side.
 
 For command-line launches, `--profile production`, `--profile development` or `SURFFISH_PROFILE=development` selects the profile.
 
@@ -35,8 +35,10 @@ For command-line launches, `--profile production`, `--profile development` or `S
 - `TabManager.swift`: WKWebView tab lifecycle, stable IDs, active selection, pinning, groups and Space metadata.
 - `BrowserSessionStore.swift`: versioned, atomic session persistence.
 - `BrowserSettingsStore.swift`: versioned settings with backward-compatible defaults.
+- `BrowserLibraryStore.swift`: profile-local bookmarks and capped browsing history; private visits are excluded.
 - `MainWindowController.swift`: native window, sidebar, toolbar, WebKit content and browser commands.
 - `SidebarView.swift` and `OmniboxView.swift`: native browser chrome.
+- Native sidebar panels cover Tabs, History and Bookmarks; Settings is organized into General, Privacy, Extensions, Connection and About.
 - `WebExtensionManager.swift`: WebKit Web Extensions, Chrome Web Store CRX installs, Firefox Add-ons XPI installs and profile-specific extension storage.
 - `SshTunnelManager.swift`: native OpenSSH dynamic SOCKS5 forwarding (`-D`), readiness, status and reconnect.
 - `WebKitProxyController.swift`: WebKit SOCKSv5 proxy configuration with failover disabled.
