@@ -95,6 +95,7 @@ public final class TabManager: NSObject, WKNavigationDelegate {
            let extensionConfiguration = context.webViewConfiguration,
            !isPrivate {
             configuration = extensionConfiguration
+            configuration.websiteDataStore = WKWebsiteDataStore(forIdentifier: BrowserProfile.current.websiteDataStoreIdentifier)
             BrambleNativeBridge.shared.applyTo(userContentController: configuration.userContentController)
         } else {
             configuration = WKWebViewConfiguration()
