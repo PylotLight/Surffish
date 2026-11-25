@@ -17,6 +17,7 @@ public final class SshTunnelManager {
     private var target = ""
     private var enabled = false
     private var generation = 0
+    private var reconnectAttempt = 0
     private var reconnectTask: Task<Void, Never>?
 
     private let startupTimeout: TimeInterval = 8
@@ -133,6 +134,7 @@ public final class SshTunnelManager {
                 if child.isRunning {
                     let listening = await Self.isListening(port: port)
                     if listening {
+                        reconnectAttempt = 0
                         updateStatus("Connected · 127.0.0.1:\(port)")
                         TabManager.shared.reloadAllTabs()
                         return
@@ -166,8 +168,11 @@ public final class SshTunnelManager {
     private func scheduleReconnect(generation runID: Int) {
         guard enabled, runID == generation else { return }
         reconnectTask?.cancel()
+        let delays: [Double] = [1, 2, 5, 10, 20, 30]
+        let delay = delays[min(reconnectAttempt, delays.count - 1)]
+        reconnectAttempt += 1
         reconnectTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(5))
+            try? await Task.sleep(for: .seconds(delay))
             guard !Task.isCancelled, let self, runID == self.generation, self.enabled else { return }
             await self.stopProcess()
             await self.startTunnel(generation: runID)
