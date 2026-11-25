@@ -576,56 +576,58 @@ public struct BrowserSettingsView: View {
     }
 
     private var generalPage: some View {
-        GroupBox("Browser") {
-            VStack(alignment: .leading, spacing: 12) {
-                Picker("Search engine", selection: $model.searchEngine) {
-                    ForEach(BrowserSearchEngine.allCases, id: \.self) { engine in
-                        Text(engine.displayName).tag(engine)
+        VStack(alignment: .leading, spacing: 14) {
+            GroupBox("Browser") {
+                VStack(alignment: .leading, spacing: 12) {
+                    Picker("Search engine", selection: $model.searchEngine) {
+                        ForEach(BrowserSearchEngine.allCases, id: \.self) { engine in
+                            Text(engine.displayName).tag(engine)
+                        }
+                    }
+                    TextField("New tab page URL", text: $model.startPage)
+                        .textFieldStyle(.roundedBorder)
+                    Toggle("Restore tabs from the previous session", isOn: $model.restoreSession)
+                    Toggle("Show the sidebar at startup", isOn: $model.showSidebarAtStartup)
+                    Toggle("Keep the sidebar open when the pointer leaves", isOn: $model.sidebarPinned)
+                    VStack(alignment: .leading, spacing: 5) {
+                        HStack {
+                            Text("Sidebar width")
+                            Spacer()
+                            Text("\(Int(model.sidebarWidth.rounded())) pt")
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
+                        Slider(
+                            value: $model.sidebarWidth,
+                            in: Double(BrowserSettings.minimumSidebarWidth)...Double(BrowserSettings.maximumSidebarWidth),
+                            step: 10
+                        )
+                        .accessibilityLabel("Sidebar width")
                     }
                 }
-                TextField("New tab page URL", text: $model.startPage)
-                    .textFieldStyle(.roundedBorder)
-                Toggle("Restore tabs from the previous session", isOn: $model.restoreSession)
-                Toggle("Show the sidebar at startup", isOn: $model.showSidebarAtStartup)
-                Toggle("Keep the sidebar open when the pointer leaves", isOn: $model.sidebarPinned)
-                VStack(alignment: .leading, spacing: 5) {
+                .padding(.top, 6)
+            }
+            GroupBox("Downloads") {
+                VStack(alignment: .leading, spacing: 10) {
+                    Toggle("Ask where to save each download", isOn: $model.askWhereToSaveDownloads)
+                    Text("Downloads are stored in the selected folder. History is kept separately for each browser profile; private-tab entries are not saved.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(model.downloadsDirectory)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                        .textSelection(.enabled)
+                        .lineLimit(2)
+                        .truncationMode(.middle)
                     HStack {
-                        Text("Sidebar width")
-                        Spacer()
-                        Text("\(Int(model.sidebarWidth.rounded())) pt")
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
+                        Button("Choose Folder…") { model.chooseDownloadsDirectory() }
+                        Button("Use Default") { model.downloadsDirectory = BrowserSettings.defaultDownloadsDirectory }
+                            .disabled(model.downloadsDirectory == BrowserSettings.defaultDownloadsDirectory)
                     }
-                    Slider(
-                        value: $model.sidebarWidth,
-                        in: Double(BrowserSettings.minimumSidebarWidth)...Double(BrowserSettings.maximumSidebarWidth),
-                        step: 10
-                    )
-                    .accessibilityLabel("Sidebar width")
                 }
+                .padding(.top, 6)
             }
-            .padding(.top, 6)
-        }
-        GroupBox("Downloads") {
-            VStack(alignment: .leading, spacing: 10) {
-                Toggle("Ask where to save each download", isOn: $model.askWhereToSaveDownloads)
-                Text("Downloads are stored in the selected folder. History is kept separately for each browser profile; private-tab entries are not saved.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(model.downloadsDirectory)
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.tertiary)
-                    .textSelection(.enabled)
-                    .lineLimit(2)
-                    .truncationMode(.middle)
-                HStack {
-                    Button("Choose Folder…") { model.chooseDownloadsDirectory() }
-                    Button("Use Default") { model.downloadsDirectory = BrowserSettings.defaultDownloadsDirectory }
-                        .disabled(model.downloadsDirectory == BrowserSettings.defaultDownloadsDirectory)
-                }
-            }
-            .padding(.top, 6)
         }
     }
 
