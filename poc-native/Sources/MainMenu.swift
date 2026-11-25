@@ -52,7 +52,18 @@ public func setupApplicationMenu() {
     viewMenu.addItem(NSMenuItem(title: "Toggle Sidebar", action: #selector(MainWindowController.menuToggleSidebar), keyEquivalent: "\\"))
     viewMenu.addItem(NSMenuItem(title: "Focus Address Bar", action: #selector(MainWindowController.menuFocusAddress), keyEquivalent: "l"))
     
-    // 5. Window Menu
+    // 5. Testing Menu — development-only hooks are intentionally outside browser chrome.
+    let testingMenuItem = NSMenuItem()
+    mainMenu.addItem(testingMenuItem)
+    let testingMenu = NSMenu(title: "Testing")
+    testingMenuItem.submenu = testingMenu
+    testingMenu.addItem(NSMenuItem(title: "Diagnostics…", action: #selector(MainWindowController.menuShowDiagnostics), keyEquivalent: ""))
+    testingMenu.addItem(NSMenuItem.separator())
+    testingMenu.addItem(NSMenuItem(title: "Test Ad Blocker", action: #selector(MainWindowController.menuTestAdBlock), keyEquivalent: ""))
+    testingMenu.addItem(NSMenuItem(title: "Install Extension…", action: #selector(MainWindowController.menuTestInstallExtension), keyEquivalent: ""))
+    testingMenu.addItem(NSMenuItem(title: "Test Touch ID", action: #selector(MainWindowController.menuTestTouchID), keyEquivalent: ""))
+
+    // 6. Window Menu
     let winMenuItem = NSMenuItem()
     mainMenu.addItem(winMenuItem)
     let winMenu = NSMenu(title: "Window")
