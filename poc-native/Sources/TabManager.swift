@@ -159,6 +159,12 @@ public final class TabManager: NSObject, WKNavigationDelegate {
             }
         }
 
+        if tabs.isEmpty {
+            isRestoringSession = false
+            _ = createTab(url: Self.startPage)
+            return
+        }
+
         if let restoredID = saved.activeTabID, tabs.contains(where: { $0.id == restoredID }) {
             activeTabId = restoredID
         } else {
