@@ -73,7 +73,7 @@ public final class BrowserSettingsWindowController: NSWindowController {
         let sshHostHint = NSTextField(wrappingLabelWithString: "Search reads Host names from your local ~/.ssh/config (including included config files). Select one to fill this field, or enter an SSH alias or user@host manually. With an SSH alias, the shared port above is used by Surffish and other apps.")
         sshHostHint.textColor = .secondaryLabelColor
         sshHostHint.maximumNumberOfLines = 3
-        let sshPortRow = makeRow(title: "Local listen port", control: sshProxyPort)
+        let sshPortRow = makeRow(title: "Shared SOCKS5 port", control: sshProxyPort)
         let sshBindRow = makeRow(title: "Listen address", control: sshProxyBindAddress)
         let proxySharingWarning = NSTextField(wrappingLabelWithString: "Surffish creates a local SOCKS5 proxy and carries browser connections through SSH. Destination traffic exits from the SSH host. LAN sharing exposes the local endpoint without SOCKS authentication; use only on a trusted network.")
         proxySharingWarning.textColor = .secondaryLabelColor
