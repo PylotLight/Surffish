@@ -68,7 +68,6 @@ public final class TabManager: NSObject, WKNavigationDelegate {
     public private(set) var tabs: [TabItem] = []
     public private(set) var activeTabId: UUID?
     public private(set) var isRestoringSession = false
-    public private(set) var sidebarVisible = true
 
     public var activeTab: TabItem? {
         guard let id = activeTabId else { return nil }
@@ -233,13 +232,8 @@ public final class TabManager: NSObject, WKNavigationDelegate {
         notifyTabsChanged()
     }
 
-    public func setSidebarVisible(_ visible: Bool) {
-        sidebarVisible = visible
-    }
-
-    public func persistSession(sidebarVisible: Bool? = nil) {
+    public func persistSession() {
         guard !isRestoringSession else { return }
-        if let sidebarVisible { self.sidebarVisible = sidebarVisible }
         let persistentTabs = tabs.filter { !$0.isPrivate }.compactMap { tab -> SavedBrowserTab? in
             guard let url = tab.webView.url ?? tab.url else { return nil }
             return SavedBrowserTab(
@@ -254,7 +248,7 @@ public final class TabManager: NSObject, WKNavigationDelegate {
         let savedActiveID = activeTab.flatMap { $0.isPrivate ? nil : $0.id }
             ?? persistentTabs.first?.id
         BrowserSessionStore.shared.save(
-            SavedBrowserSession(tabs: persistentTabs, activeTabID: savedActiveID, sidebarVisible: self.sidebarVisible)
+            SavedBrowserSession(tabs: persistentTabs, activeTabID: savedActiveID)
         )
     }
 
