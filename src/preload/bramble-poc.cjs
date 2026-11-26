@@ -13,6 +13,21 @@ contextBridge.exposeInMainWorld(
     // Only honoured from Bramble's hidden offscreen page (see ipc.ts).
     openPopout: (url) => ipcRenderer.invoke("browser:bramble:popout-open", url),
     closePopout: () => ipcRenderer.invoke("browser:bramble:popout-close"),
+    biometrics:
+      globalThis.location &&
+      globalThis.location.protocol === "chrome-extension:"
+        ? Object.freeze({
+            available: () =>
+              ipcRenderer.invoke("browser:bramble:biometrics:available"),
+            create: (saltBase64) =>
+              ipcRenderer.invoke(
+                "browser:bramble:biometrics:create",
+                saltBase64,
+              ),
+            get: (saltBase64) =>
+              ipcRenderer.invoke("browser:bramble:biometrics:get", saltBase64),
+          })
+        : undefined,
   }),
 );
 

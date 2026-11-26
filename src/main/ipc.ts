@@ -104,6 +104,7 @@ import {
   openBrambleOptionsFromUi,
   openBramblePoc,
   openBrambleSetup,
+  setBramblePopupBlurHold,
   setBrambleToolbarAnchor,
   writeBrambleClipboardText,
 } from "./bramble-poc";
@@ -623,6 +624,44 @@ export function registerIpc(): void {
     writeBrambleClipboardText(value);
     return true;
   });
+  const brambleBiometrics = (): Promise<
+    typeof import("./bramble-biometrics")
+  > => import("./bramble-biometrics");
+  const assertBrambleUiPage = (event: Electron.IpcMainInvokeEvent): void => {
+    const sourceWindow = BrowserWindow.fromWebContents(event.sender);
+    if (
+      event.senderFrame !== event.sender.mainFrame ||
+      !isBrambleClipboardSource(sourceWindow, event.sender)
+    ) {
+      throw new Error(
+        "Only a Bramble extension UI page can use native biometrics.",
+      );
+    }
+  };
+  ipcMain.handle("browser:bramble:biometrics:available", async (event) => {
+    assertBrambleUiPage(event);
+    return await (await brambleBiometrics()).isBrambleBiometricsAvailable();
+  });
+  ipcMain.handle(
+    "browser:bramble:biometrics:create",
+    async (event, saltBase64: unknown) => {
+      assertBrambleUiPage(event);
+      return (await brambleBiometrics()).createBrambleBiometricsCredential(
+        saltBase64,
+        setBramblePopupBlurHold,
+      );
+    },
+  );
+  ipcMain.handle(
+    "browser:bramble:biometrics:get",
+    async (event, saltBase64: unknown) => {
+      assertBrambleUiPage(event);
+      return (await brambleBiometrics()).getBrambleBiometricsAssertion(
+        saltBase64,
+        setBramblePopupBlurHold,
+      );
+    },
+  );
   // Quick unlock (PIN / Touch ID) for Bramble: the module loads on the first call, never at startup.
   const quickUnlock = (): Promise<typeof import("./bramble-quick-unlock")> =>
     import("./bramble-quick-unlock");
