@@ -8,6 +8,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, join, resolve } from "node:path";
+import { BRAMBLE_BIOMETRICS_POLYFILL_SOURCE } from "../shared/bramble-biometrics.ts";
 import { EXTENSION_PAGE_TABS_SHIM } from "./extension-tabs-shim.ts";
 
 export const BRAMBLE_BROWSER_ALIAS_FILE = "surffish-bramble-browser-alias.js";
@@ -339,6 +340,7 @@ export const BRAMBLE_BROWSER_ALIAS_SOURCE = `(() => {
   if (typeof globalThis.document !== 'undefined' && globalThis.location?.protocol === 'chrome-extension:' &&
       globalThis.location.pathname !== '/offscreen.html') {
     (${EXTENSION_PAGE_TABS_SHIM})(extensionApi, globalThis.surffishExtensionHost);
+    (${BRAMBLE_BIOMETRICS_POLYFILL_SOURCE})(brambleBridge?.biometrics);
   }
   if (typeof globalThis.document !== 'undefined' && extensionApi?.runtime &&
       typeof brambleBridge?.openOptionsPage === 'function' && typeof extensionApi.runtime.openOptionsPage === 'function') {

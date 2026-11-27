@@ -25,6 +25,11 @@ import {
   isWebKitGoogleSignInAvailable,
   runWebKitGoogleSignIn,
 } from "./google-webkit-sign-in";
+import {
+  isTorBoxLoginUrl,
+  TORBOX_COOKIE_DOMAIN,
+} from "../shared/webkit-login.ts";
+import { isWebKitLoginAvailable, runWebKitLogin } from "./webkit-login";
 import { Buffer } from "node:buffer";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -2259,6 +2264,35 @@ function handOffGoogleSignIn(
   return true;
 }
 
+/**
+ * TorBox's Turnstile challenge is assigned a broken round in Chromium, so login never completes.
+ * WebKit passes it; hand the login to the native WebKit helper, import its cookies and reload.
+ */
+const TORBOX_HANDOFF_LOOP_GUARD_MS = 2 * 60 * 1000;
+const torBoxHandOffAt = new WeakMap<Electron.WebContents, number>();
+
+function handOffTorBoxLogin(
+  contents: Electron.WebContents,
+  url: string,
+): boolean {
+  if (contents.session !== getBrowserSession()) return false;
+  if (!isWebKitLoginAvailable() || !isTorBoxLoginUrl(url)) return false;
+  const last = torBoxHandOffAt.get(contents);
+  if (last !== undefined && Date.now() - last < TORBOX_HANDOFF_LOOP_GUARD_MS)
+    return false;
+  torBoxHandOffAt.set(contents, Date.now());
+  void runWebKitLogin(url, [TORBOX_COOKIE_DOMAIN]).then((result) => {
+    if (contents.isDestroyed()) return;
+    if (result === "signed-in") {
+      void contents.loadURL("https://www.torbox.app/").catch(() => {});
+    } else if (result === "cancelled") {
+      // The user closed the helper without logging in; let the tab continue normally.
+      void contents.loadURL(url).catch(() => {});
+    }
+  });
+  return true;
+}
+
 /** What a tab's popups need from the browser: links out of them open as tabs in the tab's window. */
 function pagePopupHost(tab: BrowserTab): PagePopupHost {
   return {
@@ -2283,7 +2317,8 @@ function pagePopupHost(tab: BrowserTab): PagePopupHost {
         persistOpenTabs();
     },
     handOffSignIn: (contents, url) =>
-      !tab.isPrivate && handOffGoogleSignIn(contents, url),
+      !tab.isPrivate &&
+      (handOffGoogleSignIn(contents, url) || handOffTorBoxLogin(contents, url)),
   };
 }
 
@@ -2629,13 +2664,20 @@ function createTabView(
     if (!tab.extensionPageOrigin && pageMadeUrlKind(url)) return;
     if (!resolveNavigationTarget(url) || !/^https?:\/\//i.test(url))
       return event.preventDefault();
-    if (!tab.isPrivate && handOffGoogleSignIn(contents, url))
+    if (
+      !tab.isPrivate &&
+      (handOffGoogleSignIn(contents, url) || handOffTorBoxLogin(contents, url))
+    )
       event.preventDefault();
   });
   contents.on("will-redirect", (event, url, _isInPlace, isMainFrame) => {
     if (!/^https?:\/\//i.test(url) && !isExtensionPage(tab, url))
       return event.preventDefault();
-    if (isMainFrame && !tab.isPrivate && handOffGoogleSignIn(contents, url))
+    if (
+      isMainFrame &&
+      !tab.isPrivate &&
+      (handOffGoogleSignIn(contents, url) || handOffTorBoxLogin(contents, url))
+    )
       event.preventDefault();
   });
   contents.on("did-start-loading", () => {

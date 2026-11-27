@@ -96,6 +96,7 @@ export function isImportableCookieDomain(domain: string): boolean {
 
 export function toElectronCookie(
   cookie: WebKitCookie,
+  isAllowed: (domain: string) => boolean = isImportableCookieDomain,
 ): ElectronCookieDetails | null {
   if (
     !cookie ||
@@ -104,7 +105,7 @@ export function toElectronCookie(
     typeof cookie.domain !== "string"
   )
     return null;
-  if (!isImportableCookieDomain(cookie.domain)) return null;
+  if (!isAllowed(cookie.domain)) return null;
   const host = cookie.domain.replace(/^\./, "");
   const path = cookie.path || "/";
   const secure = Boolean(cookie.secure);

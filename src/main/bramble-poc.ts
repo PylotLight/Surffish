@@ -1216,6 +1216,10 @@ export function writeBrambleClipboardText(text: string): void {
   clipboard.writeText(text);
 }
 
+export function setBramblePopupBlurHold(hold: boolean): void {
+  popupBlurHold = hold;
+}
+
 export function disposeBramblePoc(): void {
   disposePopup();
   disposeOffscreen();
