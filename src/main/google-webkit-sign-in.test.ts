@@ -139,6 +139,12 @@ test("parses helper protocol lines", () => {
     type: "bramble-fill",
     id: "abc",
   });
+  assert.deepEqual(
+    parseHelperMessage(
+      '{"type":"cookies","cookies":[],"localStorage":"{\\"k\\":\\"v\\"}"}',
+    ),
+    { type: "cookies", cookies: [], localStorage: '{"k":"v"}' },
+  );
   assert.equal(parseHelperMessage("2026-10-12 noise"), null);
   assert.equal(parseHelperMessage("[]"), null);
   assert.equal(parseHelperMessage('{"type":"cookies"}'), null);

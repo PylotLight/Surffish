@@ -26,6 +26,7 @@ import {
   runWebKitGoogleSignIn,
 } from "./google-webkit-sign-in";
 import {
+  isTorBoxLoginUrl,
   isTorBoxSessionCookie,
   isTorBoxUrl,
   TORBOX_COOKIE_DOMAIN,
@@ -2294,6 +2295,8 @@ async function maybeHandOffTorBoxLogin(
     console.info(`[webkit-login] no hand-off: ${reason} — ${url}`);
     return false;
   };
+  // Only the login page is worth interrupting. Navigating around the site stays in Chromium.
+  if (!isTorBoxLoginUrl(url)) return skip("not the TorBox login page");
   if (contents.isDestroyed() || contents.session !== getBrowserSession())
     return skip("tab is not in the profile session");
   if (!isWebKitLoginAvailable())
@@ -2319,8 +2322,40 @@ async function maybeHandOffTorBoxLogin(
     return skip("duplicate navigation (recent hand-off)");
   torBoxHandOffAt.set(contents, Date.now());
   console.info("[webkit-login] handing TorBox login to WebKit:", url);
-  // Always open the login page, even when the trigger was a link to the site's home page.
-  const result = await runWebKitLogin(TORBOX_LOGIN_URL, [TORBOX_COOKIE_DOMAIN]);
+  const result = await runWebKitLogin(
+    TORBOX_LOGIN_URL,
+    [TORBOX_COOKIE_DOMAIN],
+    async (localStorage) => {
+      if (!localStorage || contents.isDestroyed()) return;
+      let entries: Array<[string, string]>;
+      try {
+        const parsed = JSON.parse(localStorage) as Record<string, unknown>;
+        entries = Object.entries(parsed).filter(
+          (entry): entry is [string, string] => typeof entry[1] === "string",
+        );
+      } catch {
+        return;
+      }
+      if (entries.length === 0) return;
+      // The tab is on torbox.app (that's what triggered the hand-off), so the storage belongs to
+      // the right origin. Let an in-flight load finish before writing to it.
+      if (contents.isLoading())
+        await new Promise<void>((resolve) =>
+          contents.once("did-finish-load", () => resolve()),
+        );
+      if (contents.isDestroyed()) return;
+      const script = `(function(){const e=${JSON.stringify(entries)};let n=0;for(let i=0;i<e.length;i++){try{localStorage.setItem(e[i][0],e[i][1]);n++}catch(_){}}return n})()`;
+      try {
+        const count = await contents.executeJavaScript(script, true);
+        console.info(
+          `[webkit-login] imported ${count} localStorage value(s) into the TorBox session.`,
+        );
+        await contents.reload();
+      } catch (error) {
+        console.warn("[webkit-login] could not import localStorage:", error);
+      }
+    },
+  );
   torBoxHandOffAt.delete(contents);
   if (result === "signed-in" && !contents.isDestroyed())
     void contents.loadURL("https://www.torbox.app/").catch(() => {});
