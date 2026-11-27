@@ -100,6 +100,17 @@ test("maps WebKit cookies to Electron cookie details", () => {
       sameSite: "lax",
     },
   );
+  // WKCookieSameSite.rawValue is a number in real helper output; it must not throw.
+  assert.equal(
+    toElectronCookie({
+      name: "SID",
+      value: "v",
+      domain: ".google.com",
+      secure: true,
+      sameSite: 1,
+    })?.sameSite,
+    "no_restriction",
+  );
   assert.equal(
     toElectronCookie({ name: "x", value: "y", domain: ".evil.example" }),
     null,
@@ -134,10 +145,13 @@ test("parses helper protocol lines", () => {
   assert.equal(parseHelperMessage('{"type":"bramble-fill","id":""}'), null);
 });
 
-test("only fills Bramble logins on Google sign-in", () => {
+test("only fills Bramble logins on the supported sign-in hosts", () => {
   assert.equal(isBrambleFillHost("accounts.google.com"), true);
+  for (const host of ["torbox.app", "www.torbox.app"])
+    assert.equal(isBrambleFillHost(host), true);
   assert.equal(isBrambleFillHost("evil.example"), false);
   assert.equal(isBrambleFillHost("accounts.google.com.evil.example"), false);
+  assert.equal(isBrambleFillHost("torbox.app.evil.example"), false);
 });
 
 test("formats the owner window frame for the helper", () => {

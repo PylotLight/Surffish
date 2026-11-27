@@ -9,6 +9,9 @@
 //
 // Protocol with Surffish: one JSON object per line on stdout.
 //   {"type":"cookies","cookies":[{"name","value","domain","path","secure","httpOnly",...}]}
+//   {"type":"bramble-list","host":"www.torbox.app"}
+//   {"type":"bramble-fill","id":"<entry id>"}
+// stdin -> helper: bramble-list / bramble-fill replies. Credentials stay in memory, never logged.
 import AppKit
 import WebKit
 
@@ -51,11 +54,46 @@ func safariUserAgent() -> String {
     return "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/\(version) Safari/605.1.15"
 }
 
+func send(_ message: [String: Any]) {
+    guard let data = try? JSONSerialization.data(withJSONObject: message) else { return }
+    FileHandle.standardOutput.write(data)
+    FileHandle.standardOutput.write("\n".data(using: .utf8)!)
+}
+
+/// Fill a typical email/password login form. Does not press Submit: sites often add a challenge or
+/// a second step, and the user can finish in the WebKit window.
+let fillScript = """
+const visible = (el) => !!el && el.offsetParent !== null && !el.disabled;
+const pick = (sel) => [...document.querySelectorAll(sel)].find(visible);
+const wait = async (sel, ms) => {
+  const end = Date.now() + ms;
+  while (Date.now() < end) { const el = pick(sel); if (el) return el; await new Promise(r => setTimeout(r, 200)); }
+  return null;
+};
+const set = (el, value) => {
+  el.focus();
+  const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+  const descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
+  if (descriptor && descriptor.set) descriptor.set.call(el, value); else el.value = value;
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+};
+const emailSel = 'input[type=email], input[name=email], input#email, input[autocomplete=username]';
+const passSel = 'input[type=password]';
+const email = pick(emailSel);
+if (email && username) set(email, username);
+const pass = await wait(passSel, email ? 10000 : 1500);
+if (pass && password) set(pass, password);
+return [email, pass].filter(Boolean).length;
+"""
+
 @MainActor
 final class LoginDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigationDelegate {
     var window: NSWindow!
     var webView: WKWebView!
+    var fillButton: NSButton!
     var finished = false
+    var stdinBuffer = Data()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let configuration = WKWebViewConfiguration()
@@ -70,13 +108,14 @@ final class LoginDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WK
         window.title = "Sign in with WebKit · Surffish"
         window.contentView = webView
         window.delegate = self
-        installDoneButton()
+        installButtons()
         installMenu()
         placeWindow(size: size)
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         window.makeFirstResponder(webView)
+        listenToSurffish()
         webView.load(URLRequest(url: startURL))
     }
 
@@ -91,15 +130,23 @@ final class LoginDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WK
         window.setFrame(NSRect(origin: origin, size: size), display: false)
     }
 
-    func installDoneButton() {
-        let button = NSButton(title: "Done — import session", target: self, action: #selector(done))
-        button.bezelStyle = .rounded
-        button.controlSize = .small
-        button.toolTip = "Return to Surffish with this site's session"
-        button.sizeToFit()
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: button.frame.width + 12, height: 28))
-        button.frame.origin = NSPoint(x: 0, y: (28 - button.frame.height) / 2)
-        container.addSubview(button)
+    func installButtons() {
+        fillButton = NSButton(title: "Fill from Bramble", target: self, action: #selector(requestBrambleLogins))
+        fillButton.bezelStyle = .rounded
+        fillButton.controlSize = .small
+        fillButton.toolTip = "Fill this login from Bramble (⇧⌘L)"
+        fillButton.sizeToFit()
+        let doneButton = NSButton(title: "Done — import session", target: self, action: #selector(done))
+        doneButton.bezelStyle = .rounded
+        doneButton.controlSize = .small
+        doneButton.toolTip = "Return to Surffish with this site's session"
+        doneButton.sizeToFit()
+        let width = fillButton.frame.width + doneButton.frame.width + 18
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: width, height: 28))
+        fillButton.frame.origin = NSPoint(x: 0, y: (28 - fillButton.frame.height) / 2)
+        doneButton.frame.origin = NSPoint(x: fillButton.frame.width + 8, y: (28 - doneButton.frame.height) / 2)
+        container.addSubview(fillButton)
+        container.addSubview(doneButton)
         let accessory = NSTitlebarAccessoryViewController()
         accessory.view = container
         accessory.layoutAttribute = .trailing
@@ -126,9 +173,111 @@ final class LoginDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WK
         editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
         editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         editMenu.addItem(NSMenuItem.separator())
+        let fill = editMenu.addItem(withTitle: "Fill from Bramble", action: #selector(requestBrambleLogins), keyEquivalent: "l")
+        fill.keyEquivalentModifierMask = [.command, .shift]
+        fill.target = self
+        editMenu.addItem(NSMenuItem.separator())
         editMenu.addItem(withTitle: "Done — import session", action: #selector(done), keyEquivalent: "\r")
         editItem.submenu = editMenu
         NSApp.mainMenu = mainMenu
+    }
+
+    // MARK: Bramble bridge
+
+    func listenToSurffish() {
+        FileHandle.standardInput.readabilityHandler = { handle in
+            let chunk = handle.availableData
+            Task { @MainActor in
+                guard let delegate = WebKitLoginHelper.delegate else { return }
+                if chunk.isEmpty {
+                    FileHandle.standardInput.readabilityHandler = nil
+                    return
+                }
+                delegate.receive(chunk)
+            }
+        }
+    }
+
+    func receive(_ chunk: Data) {
+        stdinBuffer.append(chunk)
+        while let newline = stdinBuffer.firstIndex(of: 0x0A) {
+            let line = stdinBuffer.subdata(in: stdinBuffer.startIndex..<newline)
+            stdinBuffer.removeSubrange(stdinBuffer.startIndex...newline)
+            guard let message = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any],
+                  let type = message["type"] as? String else { continue }
+            if type == "bramble-list" { handleLoginList(message) }
+            else if type == "bramble-fill" { handleFill(message) }
+        }
+    }
+
+    @objc func requestBrambleLogins() {
+        guard let host = webView.url?.host?.lowercased(),
+              host == targetDomain || host == "www.\(targetDomain)" else {
+            NSSound.beep()
+            return
+        }
+        fillButton.isEnabled = false
+        fillButton.title = "Asking Bramble…"
+        send(["type": "bramble-list", "host": host])
+    }
+
+    func resetFillButton() {
+        fillButton.isEnabled = true
+        fillButton.title = "Fill from Bramble"
+        fillButton.sizeToFit()
+    }
+
+    func handleLoginList(_ message: [String: Any]) {
+        let status = message["status"] as? String ?? "unavailable"
+        let logins = (message["logins"] as? [[String: Any]] ?? []).compactMap { item -> (String, String)? in
+            guard let id = item["id"] as? String, let label = item["label"] as? String else { return nil }
+            return (id, label)
+        }
+        resetFillButton()
+        switch status {
+        case "locked":
+            notice("Bramble is locked", "Unlock Bramble in the Surffish window, then press Fill from Bramble again.")
+        case "ok" where logins.isEmpty:
+            notice("No login in Bramble", "Bramble has no saved login for this site.")
+        case "ok" where logins.count == 1:
+            send(["type": "bramble-fill", "id": logins[0].0])
+        case "ok":
+            let menu = NSMenu()
+            for (id, label) in logins {
+                let item = menu.addItem(withTitle: label, action: #selector(pickLogin(_:)), keyEquivalent: "")
+                item.representedObject = id
+                item.target = self
+            }
+            menu.popUp(positioning: nil, at: NSPoint(x: 0, y: fillButton.bounds.height + 4), in: fillButton)
+        default:
+            notice("Bramble isn’t available", "Install and unlock Bramble in Surffish to fill from it.")
+        }
+    }
+
+    @objc func pickLogin(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        send(["type": "bramble-fill", "id": id])
+    }
+
+    func handleFill(_ message: [String: Any]) {
+        guard message["status"] as? String == "ok" else {
+            notice("Couldn’t fill from Bramble", "Bramble didn’t return that login. It may have locked; unlock it and try again.")
+            return
+        }
+        let values: [String: Any] = [
+            "username": message["username"] as? String ?? "",
+            "password": message["password"] as? String ?? "",
+            "totp": message["totp"] as? String ?? ""
+        ]
+        window.makeFirstResponder(webView)
+        webView.callAsyncJavaScript(fillScript, arguments: values, in: nil, in: .page) { _ in }
+    }
+
+    func notice(_ title: String, _ text: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = text
+        alert.beginSheetModal(for: window)
     }
 
     func windowWillClose(_ notification: Notification) {

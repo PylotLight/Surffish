@@ -146,6 +146,10 @@ registerPdfEditorScheme([
 ]);
 // Bound Chromium's HTTP cache (default grows with free disk space) so the profile stays lean.
 app.commandLine.appendSwitch("disk-cache-size", String(512 * 1024 * 1024));
+// Page WebGL canvases spam Chromium's GPU process with framebuffer errors before they get a size.
+// Those are page-side noise, not Surffish logs; keep fatal errors only so the app's own diagnostics
+// stay readable. Node console output (our [webkit-login] lines) is unaffected.
+app.commandLine.appendSwitch("log-level", "3");
 // Surffish owns http→https upgrades (HTTPS-only mode, typed-host https-first with Continue to HTTP)
 // and never upgrades local-network hosts. Keep Chromium's own HTTPS-Upgrades / HTTPS-First off so
 // a plain-http LAN device can't be silently switched to TLS underneath us. (Electron 44's content
