@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   isCookieDomainAllowed,
   isTorBoxLoginUrl,
+  isTorBoxSessionCookie,
   isTorBoxUrl,
   TORBOX_COOKIE_DOMAIN,
   TORBOX_LOGIN_URL,
@@ -59,6 +60,28 @@ describe("isTorBoxUrl", () => {
       undefined,
     ])
       expect(isTorBoxUrl(url)).toBe(false);
+  });
+});
+
+describe("isTorBoxSessionCookie", () => {
+  test("ignores Cloudflare and analytics cookies left by a challenge-only helper run", () => {
+    for (const name of [
+      "cf_clearance",
+      "__cf_bm",
+      "__cfruid",
+      "_ga",
+      "_ga_ABC123",
+      "_gid",
+      "_fbp",
+      "hjid",
+      "fk",
+    ])
+      expect(isTorBoxSessionCookie(name)).toBe(false);
+  });
+
+  test("treats other TorBox cookies as possible session cookies", () => {
+    for (const name of ["session", "torbox_session", "auth_token", "sid"])
+      expect(isTorBoxSessionCookie(name)).toBe(true);
   });
 });
 

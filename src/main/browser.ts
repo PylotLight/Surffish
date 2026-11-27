@@ -25,7 +25,11 @@ import {
   isWebKitGoogleSignInAvailable,
   runWebKitGoogleSignIn,
 } from "./google-webkit-sign-in";
-import { isTorBoxUrl, TORBOX_COOKIE_DOMAIN } from "../shared/webkit-login.ts";
+import {
+  isTorBoxSessionCookie,
+  isTorBoxUrl,
+  TORBOX_COOKIE_DOMAIN,
+} from "../shared/webkit-login.ts";
 import { isWebKitLoginAvailable, runWebKitLogin } from "./webkit-login";
 import { Buffer } from "node:buffer";
 import { existsSync } from "node:fs";
@@ -2286,18 +2290,18 @@ async function maybeHandOffTorBoxLogin(
     return skip("tab is not in the profile session");
   if (!isWebKitLoginAvailable())
     return skip("helper binary not found at out/native/webkit-login");
-  // A previous helper run (or a real logged-in session) left cookies: nothing to do. Ignore
-  // analytics cookies, which say nothing about being signed in.
+  // A real logged-in session needs no helper. Cloudflare/analytics cookies from a challenge-only
+  // helper run do not count — they were exactly what made the hand-off skip while still logged out.
   try {
     const cookies = await contents.session.cookies.get({
       url: "https://www.torbox.app/",
     });
-    const sessionCookies = cookies.filter(
-      (cookie) => !/^_(ga|gid|fbp|hjid)/i.test(cookie.name),
+    const sessionCookies = cookies.filter((cookie) =>
+      isTorBoxSessionCookie(cookie.name),
     );
     if (sessionCookies.length > 0)
       return skip(
-        `TorBox session already present (${sessionCookies.length} cookie(s))`,
+        `TorBox session already present (${sessionCookies.map((c) => c.name).join(", ")})`,
       );
   } catch (error) {
     console.warn("[webkit-login] could not read TorBox cookies:", error);
