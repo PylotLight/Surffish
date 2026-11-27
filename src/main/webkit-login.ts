@@ -39,7 +39,10 @@ export function runWebKitLogin(
   url: string,
   domains: readonly string[],
 ): Promise<WebKitLoginResult> {
-  if (running) return running;
+  if (running) {
+    console.info("[webkit-login] helper already running; reusing its window");
+    return running;
+  }
   const path = helperPath();
   if (!path) return Promise.resolve("unavailable");
 
