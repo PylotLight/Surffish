@@ -2275,9 +2275,15 @@ function handOffTorBoxLogin(
   contents: Electron.WebContents,
   url: string,
 ): boolean {
-  const torBoxUrl = /^https:\/\/(?:www\.)?torbox\.app\b/i.test(url);
+  // Log the exact URL for any TorBox host: the page/redirect URL is not always the one the user typed.
+  let torBoxHost = false;
+  try {
+    const host = new URL(url).hostname.toLowerCase().replace(/\.$/, "");
+    torBoxHost = host === "torbox.app" || host.endsWith(".torbox.app");
+  } catch {}
   const skip = (reason: string): boolean => {
-    if (torBoxUrl) console.info(`[webkit-login] no hand-off: ${reason}`);
+    if (torBoxHost)
+      console.info(`[webkit-login] no hand-off: ${reason} — ${url}`);
     return false;
   };
   if (contents.session !== getBrowserSession())
@@ -6417,6 +6423,14 @@ async function navigateTabTo(
   const contents = tab.view?.webContents;
   if (!contents) return { ok: false, reason: "cancelled" };
   publishState(tab.win);
+  // Hand off here using the URL the user actually typed. The renderer's will-navigate/redirect URL
+  // can differ (TorBox's SPA rewrites the path), which made the login helper fail to trigger.
+  if (
+    !tab.isPrivate &&
+    isTorBoxLoginUrl(url) &&
+    handOffTorBoxLogin(contents, url)
+  )
+    return { ok: true };
   try {
     if (tab.isPrivate) await whenPageSessionReady(PRIVATE_PARTITION);
     else if (partitionForTab(tab) !== BROWSER_SESSION_PARTITION)
