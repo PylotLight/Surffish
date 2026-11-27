@@ -13,6 +13,7 @@ const PROGRESS_CHANNEL = "browser:mac-trackpad-swipe:progress";
 const END_CHANNEL = "browser:mac-trackpad-swipe:end";
 const RESET_CHANNEL = "browser:mac-trackpad-swipe:reset";
 const PAGE_SCALE_CHANNEL = "browser:mac-trackpad-swipe:page-scale";
+const TORBOX_LOGIN_CLICK_CHANNEL = "browser:webkit-login:request";
 
 function resolveScrollEdges(candidates) {
   let canScrollLeft = false;
@@ -441,11 +442,52 @@ function startSwipePresentation(ipcRenderer, win, doc) {
   );
 }
 
+/**
+ * TorBox's login button is an <a href="/login">, but its SPA handles the click in-page: no
+ * will-navigate event reaches the main process, so the WebKit hand-off never sees it. Catch the
+ * click in the capture phase and ask the main process to open the login in WebKit instead.
+ */
+function startTorBoxLoginLinkCatcher(ipcRenderer, win, doc) {
+  try {
+    const host = new URL(win.location.href).hostname.toLowerCase();
+    if (host !== "torbox.app" && !host.endsWith(".torbox.app")) return;
+  } catch {
+    return;
+  }
+  doc.addEventListener(
+    "click",
+    (event) => {
+      const target =
+        event.target && typeof event.target.closest === "function"
+          ? event.target.closest("a[href]")
+          : null;
+      if (!target) return;
+      const href = target.getAttribute("href") || "";
+      const label =
+        target.getAttribute("aria-label") ||
+        target.getAttribute("title") ||
+        target.getAttribute("name") ||
+        "";
+      if (
+        !/^\/login(?:[?#/]|$)/i.test(href) &&
+        !/^https:\/\/(?:www\.)?torbox\.app\/login\b/i.test(href)
+      )
+        return;
+      if (!/^\s*login\s*$/i.test(label) && !/\/login\b/i.test(href)) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      ipcRenderer.send(TORBOX_LOGIN_CLICK_CHANNEL);
+    },
+    true,
+  );
+}
+
 function startPreload(ipcRenderer, win, doc, isMainFrame = true) {
   startScrollEdgeReporter(ipcRenderer, win, doc, isMainFrame);
   if (isMainFrame) {
     startSwipePresentation(ipcRenderer, win, doc);
     startPageScaleReporter(ipcRenderer, win);
+    startTorBoxLoginLinkCatcher(ipcRenderer, win, doc);
   }
 }
 
@@ -606,6 +648,8 @@ module.exports = {
   isYouTubePageUrl,
   BACKGROUND_AUTOPLAY_POLICY_CHANNEL,
   BACKGROUND_AUTOPLAY_ALLOW_CHANNEL,
+  TORBOX_LOGIN_CLICK_CHANNEL,
+  startTorBoxLoginLinkCatcher,
 };
 
 if (process.versions.electron) {

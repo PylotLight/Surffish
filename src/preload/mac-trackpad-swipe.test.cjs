@@ -12,7 +12,61 @@ const {
   scrollEdgesAt,
   shouldYieldToPage,
   startBackgroundAutoplayGuard,
+  startTorBoxLoginLinkCatcher,
+  TORBOX_LOGIN_CLICK_CHANNEL,
 } = require("./mac-trackpad-swipe.cjs");
+
+test("TorBox login link click asks the main process to open the WebKit helper", () => {
+  const sent = [];
+  let clickListener;
+  const doc = {
+    addEventListener: (type, listener) => {
+      if (type === "click") clickListener = listener;
+    },
+  };
+  const win = { location: { href: "https://www.torbox.app/" } };
+  startTorBoxLoginLinkCatcher(
+    { send: (channel) => sent.push(channel) },
+    win,
+    doc,
+  );
+
+  const anchor = {
+    getAttribute: (name) =>
+      ({ href: "/login", "aria-label": "Login" })[name] ?? "",
+  };
+  anchor.closest = () => anchor;
+  let prevented = false;
+  let stopped = false;
+  clickListener({
+    target: anchor,
+    preventDefault: () => {
+      prevented = true;
+    },
+    stopImmediatePropagation: () => {
+      stopped = true;
+    },
+  });
+  assert.deepEqual(sent, [TORBOX_LOGIN_CLICK_CHANNEL]);
+  assert.equal(prevented, true);
+  assert.equal(stopped, true);
+
+  // Other links are untouched and never reach the main process.
+  sent.length = 0;
+  const pricing = {
+    getAttribute: (name) =>
+      ({ href: "/pricing", title: "Pricing" })[name] ?? "",
+  };
+  pricing.closest = () => pricing;
+  clickListener({
+    target: pricing,
+    preventDefault: () => {
+      prevented = false;
+    },
+    stopImmediatePropagation: () => {},
+  });
+  assert.deepEqual(sent, []);
+});
 
 test("background YouTube autoplay is blocked at document start and released when activated", async () => {
   const listeners = new Map();
