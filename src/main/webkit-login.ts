@@ -39,10 +39,12 @@ export function runWebKitLogin(
   url: string,
   domains: readonly string[],
 ): Promise<WebKitLoginResult> {
-  if (running) {
-    console.info("[webkit-login] helper already running; reusing its window");
-    return running;
-  }
+  // A previous helper window might still be open (e.g. left from a test). Starting a fresh one is
+  // the only way a new navigation can bring a window forward — never just reuse the old promise.
+  if (running)
+    console.info(
+      "[webkit-login] previous helper still open; starting a new one",
+    );
   const path = helperPath();
   if (!path) return Promise.resolve("unavailable");
 
