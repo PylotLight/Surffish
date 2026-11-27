@@ -6443,6 +6443,17 @@ async function navigateTabTo(
     replaceTabView(tab, null, url);
     return tab.view ? { ok: true } : { ok: false, reason: "cancelled" };
   }
+  // Hand off the typed login URL before anything else: an omnibox prerender for this page would
+  // otherwise be adopted below and skip both the navigation event and the regular load path.
+  if (!tab.isPrivate && isTorBoxLoginUrl(url)) {
+    ensureTabLoaded(tab);
+    const loginContents = tab.view?.webContents;
+    if (loginContents) {
+      void maybeHandOffTorBoxLogin(loginContents, url);
+      publishState(tab.win);
+      return { ok: true };
+    }
+  }
   // The address bar already prerendered exactly this page for this tab (omnibox-prerender.ts): swap it in.
   const prerendered = takeOmniboxPrerender(
     tab.id,
@@ -6476,9 +6487,6 @@ async function navigateTabTo(
   const contents = tab.view?.webContents;
   if (!contents) return { ok: false, reason: "cancelled" };
   publishState(tab.win);
-  // Hand off here using the URL the user actually typed; the renderer's navigation URL can differ
-  // (TorBox's SPA rewrites the path). Loading continues normally — the helper runs alongside it.
-  if (!tab.isPrivate) void maybeHandOffTorBoxLogin(contents, url);
   try {
     if (tab.isPrivate) await whenPageSessionReady(PRIVATE_PARTITION);
     else if (partitionForTab(tab) !== BROWSER_SESSION_PARTITION)
