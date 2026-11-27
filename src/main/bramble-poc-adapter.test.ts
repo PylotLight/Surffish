@@ -450,6 +450,7 @@ test("alias shims chrome.windows in the worker and forwards the pop-out to the o
   const page: Record<string, unknown> = {
     document: {},
     navigator: {},
+    location: { protocol: "chrome-extension:", pathname: "/offscreen.html" },
     surffishBramble: {
       openPopout: async (url: string) => {
         calls.push(`open ${url}`);
@@ -464,6 +465,8 @@ test("alias shims chrome.windows in the worker and forwards the pop-out to the o
           addListener: (fn: (message: unknown) => unknown) => {
             listener = fn;
           },
+          removeListener: () => {},
+          hasListener: () => false,
         },
       },
     },
@@ -477,6 +480,30 @@ test("alias shims chrome.windows in the worker and forwards the pop-out to the o
     "open chrome-extension://abc/popup.html?detached=1",
     "close",
   ]);
+
+  // The broadcast also reaches Bramble's popup/options pages. They must not forward it: only the
+  // offscreen host is an allowed IPC sender, and a popup close throws "Only Bramble's background
+  // host can close the Bramble pop-out".
+  const popupCalls: string[] = [];
+  const popup: Record<string, unknown> = {
+    document: {},
+    navigator: {},
+    location: { protocol: "chrome-extension:", pathname: "/popup.html" },
+    surffishBramble: {
+      openPopout: async (url: string) => {
+        popupCalls.push(`open ${url}`);
+      },
+      closePopout: async () => {
+        popupCalls.push("close");
+      },
+    },
+    chrome: page.chrome,
+  };
+  popup.globalThis = popup;
+  runInNewContext(BRAMBLE_BROWSER_ALIAS_SOURCE, popup);
+  listener?.(sent[0]);
+  listener?.(sent[1]);
+  assert.deepEqual(popupCalls, []);
 });
 
 // ---------------------------------------------------------------------------

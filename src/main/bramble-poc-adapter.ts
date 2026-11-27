@@ -319,7 +319,10 @@ export const BRAMBLE_BROWSER_ALIAS_SOURCE = `(() => {
     } catch {}
   }
   const brambleBridge = globalThis.surffishBramble;
-  if (typeof globalThis.document !== 'undefined' && extensionApi?.runtime?.onMessage && typeof brambleBridge?.openPopout === 'function') {
+  // The worker broadcasts create/remove to every extension page. Only the hidden offscreen host is
+  // allowed to drive the pop-out (the IPC handler checks that sender), so other pages ignore it.
+  if (typeof globalThis.document !== 'undefined' && globalThis.location?.protocol === 'chrome-extension:' &&
+      globalThis.location.pathname === '/offscreen.html' && extensionApi?.runtime?.onMessage && typeof brambleBridge?.openPopout === 'function') {
     extensionApi.runtime.onMessage.addListener((message) => {
       const op = message && message[WINDOWS_MESSAGE];
       if (op === 'create') void brambleBridge.openPopout(typeof message.url === 'string' ? message.url : '').catch(() => {});
