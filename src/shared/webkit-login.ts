@@ -36,8 +36,20 @@ export function isTorBoxLoginUrl(value: string | undefined | null): boolean {
  * helper test leaves those behind even when the login page is still showing. Anything else in the
  * TorBox cookie jar is treated as a session cookie.
  */
-export function isTorBoxSessionCookie(name: string): boolean {
-  return !/^(?:cf_|__cf|_ga|_gid|_fbp|_fbc|hjid|_gcl|fk|AMP_)/i.test(name);
+export function isTorBoxSessionCookie(
+  name: string,
+  httpOnly: boolean | undefined,
+): boolean {
+  // Cloudflare and third-party trackers (observed: cf_clearance, __cf_bm, _iidt, _vid_t) are left
+  // behind by a challenge-only helper run. A real login cookie is normally HttpOnly; accept a
+  // clearly auth-named JS cookie too, in case the site ever uses one.
+  if (
+    /^(?:cf_|__cf|_iidt|_vid_t|_vidi|id5|_ga|_gid|_fbp|_fbc|hjid|_gcl|fk|AMP_)/i.test(
+      name,
+    )
+  )
+    return false;
+  return httpOnly || /session|auth|token|login|^sid$/i.test(name);
 }
 
 /** Any page on TorBox — used to notice a navigation that may need the WebKit helper. */
