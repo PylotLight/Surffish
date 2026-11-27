@@ -28,8 +28,10 @@ let targetDomain: String = {
             .trimmingCharacters(in: CharacterSet(charactersIn: "."))
     }
     let parts = (startURL.host ?? "").lowercased().split(separator: ".")
-    return (parts.count > 2 && parts.first == "www" ? parts.dropFirst() : parts)
-        .joined(separator: ".")
+    if parts.count > 2, parts.first == "www" {
+        return Array(parts.dropFirst()).joined(separator: ".")
+    }
+    return parts.joined(separator: ".")
 }()
 
 /// Surffish's window frame, converted from top-left to AppKit's bottom-left coordinates.
