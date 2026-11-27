@@ -39,6 +39,6 @@ adblock-harness-output/
 # packages/cli: written at publish time (scripts/prepare-publish.mjs)
 packages/cli/release.json
 
-# local build leftovers (swift build cache, empty native/ scratch)
+# local build leftovers (swift build cache, empty root-level native/ scratch)
 .build/
-native/
+/native/
