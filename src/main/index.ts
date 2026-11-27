@@ -150,8 +150,10 @@ app.commandLine.appendSwitch("disk-cache-size", String(512 * 1024 * 1024));
 // Those are page-side noise, not Surffish logs; keep fatal errors only so the app's own diagnostics
 // stay readable. Node console output (our [webkit-login] lines) is unaffected.
 app.commandLine.appendSwitch("log-level", "3");
-// GPU-process errors bypass Chromium's log level and still land on stderr. Send Chromium's log to
-// /dev/null instead; Surffish's own console output is Node-side and unaffected.
+// GPU-process errors bypass Chromium's log level and still land on stderr. Chromium only honours
+// log-file when logging is explicitly enabled, so set both; Surffish's Node console output is
+// unaffected.
+app.commandLine.appendSwitch("enable-logging");
 app.commandLine.appendSwitch("log-file", "/dev/null");
 // Surffish owns http→https upgrades (HTTPS-only mode, typed-host https-first with Continue to HTTP)
 // and never upgrades local-network hosts. Keep Chromium's own HTTPS-Upgrades / HTTPS-First off so

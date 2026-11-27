@@ -2295,8 +2295,6 @@ async function maybeHandOffTorBoxLogin(
     console.info(`[webkit-login] no hand-off: ${reason} — ${url}`);
     return false;
   };
-  // Only the login page is worth interrupting. Navigating around the site stays in Chromium.
-  if (!isTorBoxLoginUrl(url)) return skip("not the TorBox login page");
   if (contents.isDestroyed() || contents.session !== getBrowserSession())
     return skip("tab is not in the profile session");
   if (!isWebKitLoginAvailable())
@@ -2316,6 +2314,20 @@ async function maybeHandOffTorBoxLogin(
       );
   } catch (error) {
     console.warn("[webkit-login] could not read TorBox cookies:", error);
+  }
+  // TorBox keeps its signed-in state in localStorage. Check it in the page: a login link in the SPA
+  // navigates to the home page without a /login event, so a path check alone can never catch it.
+  try {
+    const keys = (await contents.executeJavaScript(
+      `Object.keys(localStorage).filter(k => /token|auth|session|user|login/i.test(k))`,
+      true,
+    )) as string[];
+    if (Array.isArray(keys) && keys.length > 0)
+      return skip(
+        `TorBox session already present (localStorage: ${keys.join(", ")})`,
+      );
+  } catch (error) {
+    console.warn("[webkit-login] could not read TorBox localStorage:", error);
   }
   const last = torBoxHandOffAt.get(contents);
   if (last !== undefined && Date.now() - last < TORBOX_HANDOFF_DEDUPE_MS)
