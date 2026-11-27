@@ -35,6 +35,7 @@ import {
   getActiveTabWebContents,
   openSettingsTab,
   forgetTabNavigationHistory,
+  requestTorBoxWebKitLogin,
 } from "./browser";
 import { windowForContents } from "./window-scope";
 import {
@@ -204,6 +205,10 @@ export function registerIpc(): void {
     event.returnValue =
       event.senderFrame === event.sender.mainFrame &&
       shouldPauseBackgroundYouTubeAutoplay(event.sender);
+  });
+  ipcMain.on("browser:webkit-login:request", (event) => {
+    if (event.senderFrame === event.sender.mainFrame)
+      requestTorBoxWebKitLogin(event.sender);
   });
   ipcMain.on(
     "browser:mac-trackpad-swipe:scroll-edge",

@@ -2374,6 +2374,14 @@ async function maybeHandOffTorBoxLogin(
   return result === "signed-in";
 }
 
+/** The TorBox login link is handled in-page by its SPA; the preload forwards the click here. */
+export function requestTorBoxWebKitLogin(contents: Electron.WebContents): void {
+  if (contents.isDestroyed()) return;
+  const url = contents.getURL();
+  if (!isTorBoxUrl(url)) return;
+  void maybeHandOffTorBoxLogin(contents, url);
+}
+
 /** What a tab's popups need from the browser: links out of them open as tabs in the tab's window. */
 function pagePopupHost(tab: BrowserTab): PagePopupHost {
   return {
