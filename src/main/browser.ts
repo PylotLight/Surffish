@@ -2275,11 +2275,20 @@ function handOffTorBoxLogin(
   contents: Electron.WebContents,
   url: string,
 ): boolean {
-  if (contents.session !== getBrowserSession()) return false;
-  if (!isWebKitLoginAvailable() || !isTorBoxLoginUrl(url)) return false;
+  const torBoxUrl = /^https:\/\/(?:www\.)?torbox\.app\b/i.test(url);
+  const skip = (reason: string): boolean => {
+    if (torBoxUrl) console.info(`[webkit-login] no hand-off: ${reason}`);
+    return false;
+  };
+  if (contents.session !== getBrowserSession())
+    return skip("tab is not in the profile session");
+  if (!isTorBoxLoginUrl(url)) return skip("not the TorBox login page");
+  if (!isWebKitLoginAvailable())
+    return skip("helper binary not found at out/native/webkit-login");
   const last = torBoxHandOffAt.get(contents);
   if (last !== undefined && Date.now() - last < TORBOX_HANDOFF_LOOP_GUARD_MS)
-    return false;
+    return skip("recent hand-off (loop guard)");
+  console.info("[webkit-login] handing TorBox login to WebKit:", url);
   torBoxHandOffAt.set(contents, Date.now());
   void runWebKitLogin(url, [TORBOX_COOKIE_DOMAIN]).then((result) => {
     if (contents.isDestroyed()) return;

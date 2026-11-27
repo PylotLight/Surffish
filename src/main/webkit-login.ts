@@ -50,6 +50,7 @@ export function runWebKitLogin(
     );
     const args = [url, `--domain=${domains[0] ?? ""}`];
     if (frame) args.push(frame);
+    console.info("[webkit-login] starting helper:", path, args.join(" "));
     const child = spawn(path, args, { stdio: ["ignore", "pipe", "inherit"] });
     let cookies: WebKitCookie[] | null = null;
 
@@ -64,6 +65,9 @@ export function runWebKitLogin(
     });
     child.on("close", async (code) => {
       running = null;
+      console.info(
+        `[webkit-login] helper exited (${code}), cookies: ${cookies?.length ?? 0}`,
+      );
       if (code !== 0) return resolve(code === 2 ? "cancelled" : "failed");
       if (!cookies) return resolve("failed");
       const allowed = (domain: string): boolean =>
