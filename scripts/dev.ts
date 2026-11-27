@@ -30,12 +30,14 @@ if (nativeBuild.error || nativeBuild.status !== 0) {
   );
   process.exit(1);
 }
-// Non-fatal: without the helper, Google sign-in just stays inside Electron.
-spawnSync(process.execPath, [join(root, "scripts/build-google-sign-in.ts")], {
-  cwd: root,
-  stdio: "inherit",
-  env: process.env,
-});
+// Non-fatal: without the helpers, Google sign-in stays inside Electron and TorBox login has no
+// WebKit hand-off.
+for (const helper of ["build-google-sign-in.ts", "build-webkit-login.ts"])
+  spawnSync(process.execPath, [join(root, "scripts", helper)], {
+    cwd: root,
+    stdio: "inherit",
+    env: process.env,
+  });
 
 const bin =
   process.platform === "win32"
