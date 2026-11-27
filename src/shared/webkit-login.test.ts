@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   isCookieDomainAllowed,
   isTorBoxLoginUrl,
+  isTorBoxUrl,
   TORBOX_COOKIE_DOMAIN,
   TORBOX_LOGIN_URL,
 } from "./webkit-login.ts";
@@ -34,6 +35,30 @@ describe("isTorBoxLoginUrl", () => {
       undefined,
     ])
       expect(isTorBoxLoginUrl(url)).toBe(false);
+  });
+});
+
+describe("isTorBoxUrl", () => {
+  test("matches any https page on TorBox and its subdomains", () => {
+    for (const url of [
+      TORBOX_LOGIN_URL,
+      "https://www.torbox.app/",
+      "https://torbox.app/dashboard",
+      "https://api.torbox.app/x",
+    ])
+      expect(isTorBoxUrl(url)).toBe(true);
+  });
+
+  test("rejects http, lookalikes and unrelated hosts", () => {
+    for (const url of [
+      "http://www.torbox.app/",
+      "https://torbox.app.evil.test/",
+      "https://example.com/",
+      "not a url",
+      null,
+      undefined,
+    ])
+      expect(isTorBoxUrl(url)).toBe(false);
   });
 });
 
