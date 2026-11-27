@@ -2394,6 +2394,9 @@ function createTabView(
   view.setVisible(false);
 
   const contents = view.webContents;
+  // Many features attach their own once('destroyed') cleanup to each tab (11+ on a busy tab).
+  // That is expected, not a leak: raise Node's default so it doesn't warn on every such tab.
+  contents.setMaxListeners(20);
   bindContentsToWindow(contents, tab.win.window);
   attachNetworkInspector(tab.id, contents);
   attachTabSafety(contents);
