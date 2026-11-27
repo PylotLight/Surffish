@@ -2304,7 +2304,7 @@ async function maybeHandOffTorBoxLogin(
       url: "https://www.torbox.app/",
     });
     const sessionCookies = cookies.filter((cookie) =>
-      isTorBoxSessionCookie(cookie.name),
+      isTorBoxSessionCookie(cookie.name, cookie.httpOnly),
     );
     if (sessionCookies.length > 0)
       return skip(

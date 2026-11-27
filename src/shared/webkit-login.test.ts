@@ -64,24 +64,30 @@ describe("isTorBoxUrl", () => {
 });
 
 describe("isTorBoxSessionCookie", () => {
-  test("ignores Cloudflare and analytics cookies left by a challenge-only helper run", () => {
+  test("ignores Cloudflare and tracker cookies left by a challenge-only helper run", () => {
     for (const name of [
       "cf_clearance",
       "__cf_bm",
       "__cfruid",
+      "_iidt",
+      "_vid_t",
       "_ga",
       "_ga_ABC123",
       "_gid",
       "_fbp",
       "hjid",
       "fk",
-    ])
-      expect(isTorBoxSessionCookie(name)).toBe(false);
+    ]) {
+      expect(isTorBoxSessionCookie(name, true)).toBe(false);
+      expect(isTorBoxSessionCookie(name, false)).toBe(false);
+    }
   });
 
-  test("treats other TorBox cookies as possible session cookies", () => {
+  test("treats HttpOnly cookies and auth-named cookies as a possible session", () => {
     for (const name of ["session", "torbox_session", "auth_token", "sid"])
-      expect(isTorBoxSessionCookie(name)).toBe(true);
+      expect(isTorBoxSessionCookie(name, false)).toBe(true);
+    expect(isTorBoxSessionCookie("random_name", true)).toBe(true);
+    expect(isTorBoxSessionCookie("random_name", false)).toBe(false);
   });
 });
 
