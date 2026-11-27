@@ -31,6 +31,15 @@ export function isTorBoxLoginUrl(value: string | undefined | null): boolean {
   }
 }
 
+/**
+ * Cloudflare clearance/load-balancing and analytics cookies are not proof the user signed in: the
+ * helper test leaves those behind even when the login page is still showing. Anything else in the
+ * TorBox cookie jar is treated as a session cookie.
+ */
+export function isTorBoxSessionCookie(name: string): boolean {
+  return !/^(?:cf_|__cf|_ga|_gid|_fbp|_fbc|hjid|_gcl|fk|AMP_)/i.test(name);
+}
+
 /** Any page on TorBox — used to notice a navigation that may need the WebKit helper. */
 export function isTorBoxUrl(value: string | undefined | null): boolean {
   if (!value) return false;
