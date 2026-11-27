@@ -2282,6 +2282,13 @@ async function maybeHandOffTorBoxLogin(
   url: string,
 ): Promise<boolean> {
   if (!isTorBoxUrl(url)) return false;
+  console.info(
+    "[webkit-login] TorBox navigation:",
+    url,
+    contents.session === getBrowserSession()
+      ? "(profile session)"
+      : "(other session)",
+  );
   const skip = (reason: string): boolean => {
     console.info(`[webkit-login] no hand-off: ${reason} — ${url}`);
     return false;
