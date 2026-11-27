@@ -141,7 +141,11 @@ export function toElectronCookie(
 }
 
 export type HelperMessage =
-  | { type: "cookies"; cookies: WebKitCookie[] }
+  | {
+      type: "cookies";
+      cookies: WebKitCookie[];
+      localStorage?: string;
+    }
   | { type: "bramble-list"; host: string }
   | { type: "bramble-fill"; id: string };
 
@@ -155,8 +159,16 @@ export function parseHelperMessage(line: string): HelperMessage | null {
   }
   if (!parsed || typeof parsed !== "object") return null;
   const message = parsed as Record<string, unknown>;
-  if (message.type === "cookies" && Array.isArray(message.cookies))
-    return { type: "cookies", cookies: message.cookies as WebKitCookie[] };
+  if (message.type === "cookies" && Array.isArray(message.cookies)) {
+    const cookies: {
+      type: "cookies";
+      cookies: WebKitCookie[];
+      localStorage?: string;
+    } = { type: "cookies", cookies: message.cookies as WebKitCookie[] };
+    if (typeof message.localStorage === "string")
+      cookies.localStorage = message.localStorage;
+    return cookies;
+  }
   if (message.type === "bramble-list" && typeof message.host === "string")
     return { type: "bramble-list", host: message.host.toLowerCase() };
   if (

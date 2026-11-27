@@ -40,6 +40,7 @@ export function isWebKitLoginAvailable(): boolean {
 export function runWebKitLogin(
   url: string,
   domains: readonly string[],
+  onImported?: (localStorage: string | null) => Promise<void> | void,
 ): Promise<WebKitLoginResult> {
   // A previous helper window might still be open (e.g. left from a test). Starting a fresh one is
   // the only way a new navigation can bring a window forward — never just reuse the old promise.
@@ -60,6 +61,7 @@ export function runWebKitLogin(
     console.info("[webkit-login] starting helper:", path, args.join(" "));
     const child = spawn(path, args, { stdio: ["pipe", "pipe", "inherit"] });
     let cookies: WebKitCookie[] | null = null;
+    let localStorage: string | null = null;
     let lastListHost = "";
     const reply = (message: Record<string, unknown>) => {
       if (child.stdin && !child.stdin.destroyed)
@@ -69,8 +71,10 @@ export function runWebKitLogin(
     createInterface({ input: child.stdout! }).on("line", (line) => {
       const message = parseHelperMessage(line);
       if (!message) return;
-      if (message.type === "cookies") cookies = message.cookies;
-      else if (message.type === "bramble-list") {
+      if (message.type === "cookies") {
+        cookies = message.cookies;
+        localStorage = message.localStorage ?? null;
+      } else if (message.type === "bramble-list") {
         if (!isBrambleFillHost(message.host))
           return reply({
             type: "bramble-list",
@@ -135,7 +139,15 @@ export function runWebKitLogin(
       console.log(
         `[webkit-login] imported ${imported}/${cookies.length} cookie(s): ${names.join(", ") || "none"}`,
       );
-      resolve(imported > 0 ? "signed-in" : "failed");
+      const signedIn = imported > 0 || Boolean(localStorage);
+      if (signedIn && onImported) {
+        try {
+          await onImported(localStorage);
+        } catch (error) {
+          console.warn("[webkit-login] session import callback failed:", error);
+        }
+      }
+      resolve(signedIn ? "signed-in" : "failed");
     });
   });
   return running;

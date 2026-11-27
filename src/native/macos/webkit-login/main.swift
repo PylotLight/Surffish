@@ -287,6 +287,15 @@ final class LoginDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WK
     @objc func done() {
         guard !finished else { return }
         finished = true
+        // TorBox keeps its signed-in state in localStorage, not in an auth cookie: without this the
+        // Electron tab only gets trackers and stays on the login page.
+        webView.evaluateJavaScript("JSON.stringify(window.localStorage || {})") { result, _ in
+            let storageJSON = result as? String
+            self.exportCookies(storageJSON: storageJSON)
+        }
+    }
+
+    private func exportCookies(storageJSON: String?) {
         let store = webView.configuration.websiteDataStore.httpCookieStore
         store.getAllCookies { cookies in
             let rows: [[String: Any]] = cookies.compactMap { cookie in
@@ -309,7 +318,8 @@ final class LoginDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WK
                 }
                 return row
             }
-            let message: [String: Any] = ["type": "cookies", "cookies": rows]
+            var message: [String: Any] = ["type": "cookies", "cookies": rows]
+            if let storageJSON = storageJSON { message["localStorage"] = storageJSON }
             DispatchQueue.main.async {
                 if let data = try? JSONSerialization.data(withJSONObject: message),
                    let line = String(data: data, encoding: .utf8) {
