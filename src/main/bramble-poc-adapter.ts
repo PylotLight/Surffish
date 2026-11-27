@@ -118,17 +118,19 @@ export function adaptBrambleFirefoxManifest(input: unknown): JsonRecord {
   adaptedBackground.type = "module";
   manifest.background = adaptedBackground;
 
-  // `identity` is only used by Bramble's optional Google Drive OAuth backup flow.
-  // It is not available in Electron and is not required for local vault setup/unlock.
+  // `identity` is only used by Bramble's optional Google Drive OAuth backup flow, and `privacy`
+  // is a Firefox-only API. Neither is available in Electron; both are optional for local vault
+  // setup/unlock. Dropping them also avoids Electron's "Permission 'privacy' is unknown" warning.
+  const unsupportedPermissions = ["identity", "privacy"];
   if (Array.isArray(manifest.permissions)) {
     manifest.permissions = manifest.permissions.filter(
-      (permission) => permission !== "identity",
+      (permission) => !unsupportedPermissions.includes(String(permission)),
     );
   }
   const optionalPermissions = manifest.optional_permissions;
   if (Array.isArray(optionalPermissions)) {
     const filteredOptionalPermissions = optionalPermissions.filter(
-      (permission) => permission !== "identity",
+      (permission) => !unsupportedPermissions.includes(String(permission)),
     );
     if (filteredOptionalPermissions.length === 0)
       delete manifest.optional_permissions;

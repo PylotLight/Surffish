@@ -37,8 +37,8 @@ const firefoxManifest = {
   version: "1.28.0",
   browser_specific_settings: { gecko: { id: "firefox@bramble.app" } },
   background: { scripts: ["background.js"], type: "module" },
-  permissions: ["storage", "alarms", "identity"],
-  optional_permissions: ["identity"],
+  permissions: ["storage", "alarms", "identity", "privacy"],
+  optional_permissions: ["identity", "privacy"],
   action: {
     default_popup: "popup.html",
     theme_icons: [{ light: "light.png", dark: "dark.png", size: 16 }],
