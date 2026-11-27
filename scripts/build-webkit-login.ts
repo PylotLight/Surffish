@@ -1,6 +1,12 @@
 // Builds the native WebKit login helper (macOS only). Skips the ~4 s swiftc run when the helper
 // in out/native was built from the same source, flags and compiler (see native-build-cache).
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,6 +19,12 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 if (process.platform !== "darwin") process.exit(0);
 
 const source = join(root, "src/native/macos/webkit-login/main.swift");
+if (!existsSync(source)) {
+  console.warn(
+    "[webkit-login] Swift source is missing; the WebKit login hand-off is unavailable.",
+  );
+  process.exit(process.argv.includes("--strict") ? 1 : 0);
+}
 const outputDirectory = join(root, "out/native");
 const output = join(outputDirectory, "webkit-login");
 const fingerprintFile = join(outputDirectory, "webkit-login.inputs.sha256");
