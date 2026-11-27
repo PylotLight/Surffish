@@ -31,6 +31,19 @@ export function isTorBoxLoginUrl(value: string | undefined | null): boolean {
   }
 }
 
+/** Any page on TorBox — used to notice a navigation that may need the WebKit helper. */
+export function isTorBoxUrl(value: string | undefined | null): boolean {
+  if (!value) return false;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:") return false;
+    const host = url.hostname.toLowerCase().replace(/\.$/, "");
+    return host === "torbox.app" || host.endsWith(".torbox.app");
+  } catch {
+    return false;
+  }
+}
+
 /** A helper cookie belongs to the target site (or one of its subdomains), never an unrelated host. */
 export function isCookieDomainAllowed(
   domain: string,

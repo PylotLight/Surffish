@@ -25,10 +25,7 @@ import {
   isWebKitGoogleSignInAvailable,
   runWebKitGoogleSignIn,
 } from "./google-webkit-sign-in";
-import {
-  isTorBoxLoginUrl,
-  TORBOX_COOKIE_DOMAIN,
-} from "../shared/webkit-login.ts";
+import { isTorBoxUrl, TORBOX_COOKIE_DOMAIN } from "../shared/webkit-login.ts";
 import { isWebKitLoginAvailable, runWebKitLogin } from "./webkit-login";
 import { Buffer } from "node:buffer";
 import { existsSync } from "node:fs";
@@ -2268,44 +2265,53 @@ function handOffGoogleSignIn(
  * TorBox's Turnstile challenge is assigned a broken round in Chromium, so login never completes.
  * WebKit passes it; hand the login to the native WebKit helper, import its cookies and reload.
  */
-const TORBOX_HANDOFF_LOOP_GUARD_MS = 2 * 60 * 1000;
+const TORBOX_HANDOFF_DEDUPE_MS = 10 * 1000;
 const torBoxHandOffAt = new WeakMap<Electron.WebContents, number>();
 
-function handOffTorBoxLogin(
+/**
+ * Fire-and-forget: never block the tab's own navigation (the Chromium page may fail the challenge,
+ * but the helper can still succeed). Re-check on every TorBox visit unless a session already exists,
+ * so a retry after a failed or cancelled helper works.
+ */
+async function maybeHandOffTorBoxLogin(
   contents: Electron.WebContents,
   url: string,
-): boolean {
-  // Log the exact URL for any TorBox host: the page/redirect URL is not always the one the user typed.
-  let torBoxHost = false;
-  try {
-    const host = new URL(url).hostname.toLowerCase().replace(/\.$/, "");
-    torBoxHost = host === "torbox.app" || host.endsWith(".torbox.app");
-  } catch {}
+): Promise<boolean> {
+  if (!isTorBoxUrl(url)) return false;
   const skip = (reason: string): boolean => {
-    if (torBoxHost)
-      console.info(`[webkit-login] no hand-off: ${reason} — ${url}`);
+    console.info(`[webkit-login] no hand-off: ${reason} — ${url}`);
     return false;
   };
-  if (contents.session !== getBrowserSession())
+  if (contents.isDestroyed() || contents.session !== getBrowserSession())
     return skip("tab is not in the profile session");
-  if (!isTorBoxLoginUrl(url)) return skip("not the TorBox login page");
   if (!isWebKitLoginAvailable())
     return skip("helper binary not found at out/native/webkit-login");
+  // A previous helper run (or a real logged-in session) left cookies: nothing to do. Ignore
+  // analytics cookies, which say nothing about being signed in.
+  try {
+    const cookies = await contents.session.cookies.get({
+      url: "https://www.torbox.app/",
+    });
+    const sessionCookies = cookies.filter(
+      (cookie) => !/^_(ga|gid|fbp|hjid)/i.test(cookie.name),
+    );
+    if (sessionCookies.length > 0)
+      return skip(
+        `TorBox session already present (${sessionCookies.length} cookie(s))`,
+      );
+  } catch (error) {
+    console.warn("[webkit-login] could not read TorBox cookies:", error);
+  }
   const last = torBoxHandOffAt.get(contents);
-  if (last !== undefined && Date.now() - last < TORBOX_HANDOFF_LOOP_GUARD_MS)
-    return skip("recent hand-off (loop guard)");
-  console.info("[webkit-login] handing TorBox login to WebKit:", url);
+  if (last !== undefined && Date.now() - last < TORBOX_HANDOFF_DEDUPE_MS)
+    return skip("duplicate navigation (recent hand-off)");
   torBoxHandOffAt.set(contents, Date.now());
-  void runWebKitLogin(url, [TORBOX_COOKIE_DOMAIN]).then((result) => {
-    if (contents.isDestroyed()) return;
-    if (result === "signed-in") {
-      void contents.loadURL("https://www.torbox.app/").catch(() => {});
-    } else if (result === "cancelled") {
-      // The user closed the helper without logging in; let the tab continue normally.
-      void contents.loadURL(url).catch(() => {});
-    }
-  });
-  return true;
+  console.info("[webkit-login] handing TorBox login to WebKit:", url);
+  const result = await runWebKitLogin(url, [TORBOX_COOKIE_DOMAIN]);
+  torBoxHandOffAt.delete(contents);
+  if (result === "signed-in" && !contents.isDestroyed())
+    void contents.loadURL("https://www.torbox.app/").catch(() => {});
+  return result === "signed-in";
 }
 
 /** What a tab's popups need from the browser: links out of them open as tabs in the tab's window. */
@@ -2331,9 +2337,12 @@ function pagePopupHost(tab: BrowserTab): PagePopupHost {
       )
         persistOpenTabs();
     },
-    handOffSignIn: (contents, url) =>
-      !tab.isPrivate &&
-      (handOffGoogleSignIn(contents, url) || handOffTorBoxLogin(contents, url)),
+    handOffSignIn: (contents, url) => {
+      if (tab.isPrivate) return false;
+      if (handOffGoogleSignIn(contents, url)) return true;
+      void maybeHandOffTorBoxLogin(contents, url);
+      return false;
+    },
   };
 }
 
@@ -2682,21 +2691,17 @@ function createTabView(
     if (!tab.extensionPageOrigin && pageMadeUrlKind(url)) return;
     if (!resolveNavigationTarget(url) || !/^https?:\/\//i.test(url))
       return event.preventDefault();
-    if (
-      !tab.isPrivate &&
-      (handOffGoogleSignIn(contents, url) || handOffTorBoxLogin(contents, url))
-    )
-      event.preventDefault();
+    if (!tab.isPrivate && handOffGoogleSignIn(contents, url))
+      return event.preventDefault();
+    if (!tab.isPrivate) void maybeHandOffTorBoxLogin(contents, url);
   });
   contents.on("will-redirect", (event, url, _isInPlace, isMainFrame) => {
     if (!/^https?:\/\//i.test(url) && !isExtensionPage(tab, url))
       return event.preventDefault();
-    if (
-      isMainFrame &&
-      !tab.isPrivate &&
-      (handOffGoogleSignIn(contents, url) || handOffTorBoxLogin(contents, url))
-    )
-      event.preventDefault();
+    if (isMainFrame && !tab.isPrivate && handOffGoogleSignIn(contents, url))
+      return event.preventDefault();
+    if (isMainFrame && !tab.isPrivate)
+      void maybeHandOffTorBoxLogin(contents, url);
   });
   contents.on("did-start-loading", () => {
     if (!isCurrentContents()) return;
@@ -6423,14 +6428,9 @@ async function navigateTabTo(
   const contents = tab.view?.webContents;
   if (!contents) return { ok: false, reason: "cancelled" };
   publishState(tab.win);
-  // Hand off here using the URL the user actually typed. The renderer's will-navigate/redirect URL
-  // can differ (TorBox's SPA rewrites the path), which made the login helper fail to trigger.
-  if (
-    !tab.isPrivate &&
-    isTorBoxLoginUrl(url) &&
-    handOffTorBoxLogin(contents, url)
-  )
-    return { ok: true };
+  // Hand off here using the URL the user actually typed; the renderer's navigation URL can differ
+  // (TorBox's SPA rewrites the path). Loading continues normally — the helper runs alongside it.
+  if (!tab.isPrivate) void maybeHandOffTorBoxLogin(contents, url);
   try {
     if (tab.isPrivate) await whenPageSessionReady(PRIVATE_PARTITION);
     else if (partitionForTab(tab) !== BROWSER_SESSION_PARTITION)
