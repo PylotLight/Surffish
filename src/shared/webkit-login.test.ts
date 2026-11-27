@@ -13,6 +13,10 @@ describe("isTorBoxLoginUrl", () => {
       "https://torbox.app/login",
       "https://www.torbox.app/login?next=%2Fdashboard",
       "https://www.torbox.app/login#form",
+      "https://www.torbox.app/login/",
+      "https://www.torbox.app/login.php",
+      "https://www.torbox.app/auth/login",
+      "https://www.torbox.app/signin",
     ])
       expect(isTorBoxLoginUrl(url)).toBe(true);
   });

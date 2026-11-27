@@ -15,7 +15,17 @@ export function isTorBoxLoginUrl(value: string | undefined | null): boolean {
     if (url.protocol !== "https:") return false;
     const host = url.hostname.toLowerCase().replace(/\.$/, "");
     if (host !== "torbox.app" && !host.endsWith(".torbox.app")) return false;
-    return /^\/login(?:[/?#]|$)/i.test(url.pathname);
+    // TorBox's SPA has shipped /login, /login/ and /login.<ext> over time; a redirect can also add
+    // a trailing slash. Match the whole family, but not /logins or an unrelated path.
+    const path = url.pathname.toLowerCase();
+    return (
+      path === "/login" ||
+      path.startsWith("/login/") ||
+      /^\/login\.[a-z0-9]+$/.test(path) ||
+      path === "/auth/login" ||
+      path === "/signin" ||
+      path === "/sign-in"
+    );
   } catch {
     return false;
   }
