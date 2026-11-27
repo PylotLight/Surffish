@@ -2295,8 +2295,7 @@ async function maybeHandOffTorBoxLogin(
     console.info(`[webkit-login] no hand-off: ${reason} — ${url}`);
     return false;
   };
-  if (contents.isDestroyed() || contents.session !== getBrowserSession())
-    return skip("tab is not in the profile session");
+  if (contents.isDestroyed()) return false;
   if (!isWebKitLoginAvailable())
     return skip("helper binary not found at out/native/webkit-login");
   // A real logged-in session needs no helper. Cloudflare/analytics cookies from a challenge-only
@@ -2367,6 +2366,7 @@ async function maybeHandOffTorBoxLogin(
         console.warn("[webkit-login] could not import localStorage:", error);
       }
     },
+    contents.session,
   );
   torBoxHandOffAt.delete(contents);
   if (result === "signed-in" && !contents.isDestroyed())

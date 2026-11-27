@@ -41,6 +41,7 @@ export function runWebKitLogin(
   url: string,
   domains: readonly string[],
   onImported?: (localStorage: string | null) => Promise<void> | void,
+  session: Electron.Session = getBrowserSession(),
 ): Promise<WebKitLoginResult> {
   // A previous helper window might still be open (e.g. left from a test). Starting a fresh one is
   // the only way a new navigation can bring a window forward — never just reuse the old promise.
@@ -111,7 +112,6 @@ export function runWebKitLogin(
       if (!cookies) return resolve("failed");
       const allowed = (domain: string): boolean =>
         isCookieDomainAllowed(domain, domains);
-      const session = getBrowserSession();
       let imported = 0;
       const names: string[] = [];
       for (const cookie of cookies) {
