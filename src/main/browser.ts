@@ -29,6 +29,7 @@ import {
   isTorBoxSessionCookie,
   isTorBoxUrl,
   TORBOX_COOKIE_DOMAIN,
+  TORBOX_LOGIN_URL,
 } from "../shared/webkit-login.ts";
 import { isWebKitLoginAvailable, runWebKitLogin } from "./webkit-login";
 import { Buffer } from "node:buffer";
@@ -2318,7 +2319,8 @@ async function maybeHandOffTorBoxLogin(
     return skip("duplicate navigation (recent hand-off)");
   torBoxHandOffAt.set(contents, Date.now());
   console.info("[webkit-login] handing TorBox login to WebKit:", url);
-  const result = await runWebKitLogin(url, [TORBOX_COOKIE_DOMAIN]);
+  // Always open the login page, even when the trigger was a link to the site's home page.
+  const result = await runWebKitLogin(TORBOX_LOGIN_URL, [TORBOX_COOKIE_DOMAIN]);
   torBoxHandOffAt.delete(contents);
   if (result === "signed-in" && !contents.isDestroyed())
     void contents.loadURL("https://www.torbox.app/").catch(() => {});

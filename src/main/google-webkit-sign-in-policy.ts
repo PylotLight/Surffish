@@ -12,7 +12,8 @@ export interface WebKitCookie {
   secure?: boolean;
   httpOnly?: boolean;
   expirationDate?: number;
-  sameSite?: string;
+  /** WKWebView sends WKCookieSameSite.rawValue, a number; older helpers sent strings. */
+  sameSite?: string | number;
 }
 
 export interface ElectronCookieDetails {
@@ -109,7 +110,11 @@ export function toElectronCookie(
   const host = cookie.domain.replace(/^\./, "");
   const path = cookie.path || "/";
   const secure = Boolean(cookie.secure);
-  const sameSite = cookie.sameSite?.toLowerCase();
+  // WKWebView serializes WKCookieSameSite.rawValue as a number; only strings are valid here.
+  const sameSite =
+    typeof cookie.sameSite === "string"
+      ? cookie.sameSite.toLowerCase()
+      : undefined;
   const details: ElectronCookieDetails = {
     url: `${secure ? "https" : "http"}://${host}${path}`,
     name: cookie.name,
@@ -166,7 +171,11 @@ export function parseHelperMessage(line: string): HelperMessage | null {
 
 /** Bramble fills only ever answer for Google's own sign-in host. */
 export function isBrambleFillHost(host: string): boolean {
-  return host === "accounts.google.com";
+  return (
+    host === "accounts.google.com" ||
+    host === "torbox.app" ||
+    host === "www.torbox.app"
+  );
 }
 
 /** Electron top-left window frame as the helper's --frame argument. */
